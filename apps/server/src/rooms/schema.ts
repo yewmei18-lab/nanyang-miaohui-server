@@ -13,6 +13,7 @@ export const PlayerS = schema({
   hitSeq: t.uint32().default(0), // 本局已接受击打次数（驱动他人看到的拍击动作）
   lastInput: t.uint32().default(0), // 已处理的最后输入 seq（客户端重放校正）
   conn: t.boolean().default(true),
+  orng: t.uint8().default(0), // 手上的旺桔（舞狮接到的）
 }, 'Player');
 export type PlayerS = SchemaType<typeof PlayerS>;
 
@@ -38,6 +39,16 @@ export const StaffS = schema({
 }, 'Staff');
 export type StaffS = SchemaType<typeof StaffS>;
 
+/** 舞狮抛出的桔子 */
+export const OrangeS = schema({
+  id: t.string().default(''),
+  x: t.float32().default(0),
+  z: t.float32().default(0),
+  t0: t.float64().default(0), // 抛出的服务器时间（客户端从狮头飞过来）
+  by: t.string().default(''), // 被谁接到
+}, 'Orange');
+export type OrangeS = SchemaType<typeof OrangeS>;
+
 export const PlazaState = schema({
   no: t.uint16().default(0), // 房间编号（庙会 01、02…）
   players: t.map(PlayerS),
@@ -45,5 +56,7 @@ export const PlazaState = schema({
   aneh: StaffS,
   incense: t.uint8().default(0), // 香炉里正在烧的香（束）
   vq: t.uint8().default(0), // 打小人排队人数
+  evOff: t.float64().default(0), // 活动时钟偏移（只在本地测试时用）
+  oranges: t.array(OrangeS),
 }, 'PlazaState');
 export type PlazaState = SchemaType<typeof PlazaState>;

@@ -2,11 +2,11 @@ import { Room, type Client } from '@colyseus/core';
 import { randomUUID } from 'node:crypto';
 import {
   EMOTES, GAME_CONFIG, CONFIG_VERSION, MSG, PSTATE, SEAT_STATE, SEATS, SPAWN, COLLIDERS_SEATING, klDay,
-  MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES, RING, ringLanding,
+  MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES, RING, ringLanding, LION, lionElapsed, isBlocked, insideWalk,
   stepMove, stepToward, sanitizeMove, normalizeTargetName, avatarToIndices, validateAvatar, DEFAULT_AVATAR,
   type SessionResult,
 } from '@nanyang/shared';
-import { PlazaState, PlayerS, SeatS } from './schema.ts';
+import { PlazaState, PlayerS, SeatS, OrangeS } from './schema.ts';
 import { verifyToken } from '../auth.ts';
 import { pool } from '../db.ts';
 import { getWallet, spend, spendBoth, credit, refund, placeMamakOrder, setOrderStatus } from '../wallet.ts';
@@ -29,6 +29,9 @@ const AISLES = [{ x: -2.9, z: 18.15 }, { x: -0.2, z: 18.15 }, { x: -0.2, z: 14.6
 const COUNTER = { x: MAMAK_SHOP.counterX, z: MAMAK_SHOP.counterZ };
 const TICK_MS = 1000 / GAME_CONFIG.room.simulationHz;
 let roomCounter = 0;
+/** 每个账号每场舞狮最多接几颗（跨房间共用，换房也不能多拿） */
+const ORANGE_CAP = 3;
+const orangeTaken = new Map<string, number>();
 
 interface HitSession {
   id: string;
@@ -92,6 +95,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   private staffQueue: StaffTask[] = [];
   private staff: { task: StaffTask | null; phase: StaffPhase; path: Array<{ x: number; z: number }>; until: number } = { task: null, phase: 'idle', path: [], until: 0 };
   private incense: number[] = [];
+  private orangeHour = -1;
   private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
   private vQueue: string[] = [];
@@ -110,6 +114,12 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     });
     const lastChat = new Map<string, number>();
     this.onMessage('villain.queue', (client) => this.onVillainQueue(client));
+    this.onMessage('orange.give', (client, m: { to?: unknown }) => this.onOrangeGive(client, m));
+    // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
+    this.onMessage('debug.lion', (_c, m: { at?: unknown }) => {
+      if (process.env.ALLOW_DEBUG !== '1' || typeof m?.at !== 'number') return;
+      const t = (Date.now() / 1000) % 3600; this.state.evOff = (m.at - t) * 1000; this.orangeHour = -1; this.state.oranges.clear();
+    });
     this.onMessage('burn.throw', (client, m: { text?: unknown }) => this.onBurn(client, m));
     this.onMessage('lantern.launch', (client, m: { requestId?: unknown; text?: unknown; pub?: unknown }) => { void this.onLantern(client, m); });
     this.onMessage('ring.start', (client, m: { requestId?: unknown }) => { void this.onRingStart(client, m); });
@@ -199,7 +209,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     };
     if (takeover && takeover.p) {
       const o = takeover.p;
-      p.x = o.x; p.z = o.z; p.yaw = o.yaw; p.seat = o.seat; p.hitSeq = o.hitSeq;
+      p.x = o.x; p.z = o.z; p.yaw = o.yaw; p.seat = o.seat; p.hitSeq = o.hitSeq; p.orng = o.orng;
       p.st = o.st === PSTATE.DISCONNECTED ? takeover.it.stateBeforeDrop : o.st;
       p.actAt = o.actAt;
       it.path = takeover.it.path; it.pathDeadline = takeover.it.pathDeadline;
@@ -225,6 +235,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     metrics.joins++;
 
     try { client.send(MSG.S_WALLET, await getWallet(auth.playerId)); } catch { /* */ }
+    if (!takeover) { const q = await pool.query("SELECT qty FROM player_items WHERE player_id=$1 AND item='orange'", [auth.playerId]).catch(() => null); p.orng = Math.min(255, q?.rows[0]?.qty ?? 0); }
     if (leaderboard.latest) client.send(MSG.S_LEADERBOARD, leaderboard.latest);
     if (it.session) this.sendSessionState(client, it.session);
     // 天上还在飞的天灯（只给灯，不给别人的愿望文字，除非公开）
@@ -339,6 +350,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       if (it.bath) this.tickBath(sid, p, it, now);
     }
     this.tickStaff(now);
+    this.tickLion(now);
     for (const [seatId, until] of this.vHoldUntil) if (now > until) { // 轮到的人没来：给下一个
       const seat = this.state.seats[seatId]; this.vHoldUntil.delete(seatId);
       if (seat && seat.st === SEAT_STATE.FREE) { const who = seat.hold; seat.hold = ''; this.clients.find((c) => c.sessionId === who)?.send('villain.turn', { expired: true }); this.offerVillainSeat(seatId); }
@@ -728,6 +740,56 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
         client.send('bath.reward', { energy, coins, coinsToday, coinCap: BATH.dailyCoinCap });
       }
     } catch (e) { console.warn('[bath] reward failed', (e as Error).message); }
+  }
+
+  // ───────────────────── 舞狮采青 · 接旺桔 ─────────────────────
+
+  private tickLion(now: number) {
+    const t = lionElapsed(now, this.state.evOff);
+    const hour = Math.floor((now + this.state.evOff) / 3_600_000);
+    if (t === null || t > LION.oranges + LION.orangeLifeS) { if (this.state.oranges.length) this.state.oranges.clear(); return; }
+    if (t >= LION.oranges && this.orangeHour !== hour) {
+      // 抛桔子：数量跟人数走，每个在场的人都有机会；落在狮子身后（街上）不在桌子、柱子里的地方
+      this.orangeHour = hour; this.state.oranges.clear();
+      const n = Math.max(LION.orangeCount, this.state.players.size * 2);
+      let tries = 0;
+      while (this.state.oranges.length < n && tries++ < 400) {
+        const a = (Math.random() - 0.5) * 2.6, r = 1.6 + Math.random() * 2.8;
+        const x = LION.end.x + Math.sin(a) * r, z = LION.end.z - Math.cos(a) * r;
+        if (!insideWalk(x, z) || isBlocked(x, z, 0.35 as number as 0.28)) continue;
+        const o = new OrangeS(); o.id = `${hour}-${this.state.oranges.length}`; o.x = x; o.z = z; o.t0 = now + this.state.oranges.length * 120; this.state.oranges.push(o);
+      }
+      this.broadcast('act', { sid: '', a: 'lionThrow' });
+    }
+    if (!this.state.oranges.length) return;
+    // 接桔子：走到桔子旁边就接到（落地之后才能接）
+    for (const [sid, p] of this.state.players) {
+      if (p.st !== PSTATE.MOVING) continue;
+      for (const o of this.state.oranges) {
+        if (o.by || now < o.t0 + 900 || Math.hypot(p.x - o.x, p.z - o.z) > LION.orangeCatchR) continue;
+        const it = this.internal.get(sid); if (!it) break;
+        const key = `${it.playerId}:${this.orangeHour}`; const got = orangeTaken.get(key) ?? 0;
+        if (got >= ORANGE_CAP) break; // 这场已经接满，留给别人
+        orangeTaken.set(key, got + 1); if (orangeTaken.size > 5000) orangeTaken.clear();
+        o.by = sid; p.orng = Math.min(255, p.orng + 1);
+        void this.addItem(it.playerId, 'orange', 1);
+        this.clients.find((c) => c.sessionId === sid)?.send('orange.got', { total: p.orng });
+        break;
+      }
+    }
+  }
+  private addItem(playerId: string, item: string, d: number) {
+    return pool.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,$2,GREATEST(0,$3)) ON CONFLICT (player_id, item) DO UPDATE SET qty=GREATEST(0, player_items.qty+$3), updated_at=now()`, [playerId, item, d]).catch(() => {});
+  }
+  /** 把一颗旺桔递给旁边的朋友 */
+  private onOrangeGive(client: Client, m: { to?: unknown }) {
+    const p = this.state.players.get(client.sessionId); const it = this.internal.get(client.sessionId);
+    const to = typeof m?.to === 'string' ? m.to : ''; const q = this.state.players.get(to); const jt = this.internal.get(to);
+    if (!p || !it || !q || !jt || to === client.sessionId || p.orng < 1) return;
+    if (Math.hypot(p.x - q.x, p.z - q.z) > 3) return client.send(MSG.S_NOTICE, { kind: 'far', text: '再走近一点才能递给他' });
+    p.orng--; q.orng = Math.min(255, q.orng + 1);
+    void this.addItem(it.playerId, 'orange', -1); void this.addItem(jt.playerId, 'orange', 1);
+    this.broadcast('act', { sid: client.sessionId, a: 'give', to, from: p.name, toName: q.name });
   }
 
   // ───────────────────── 烧掉烦恼、天灯、套圈、拍照 ─────────────────────
