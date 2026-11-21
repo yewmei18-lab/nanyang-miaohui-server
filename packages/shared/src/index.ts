@@ -7,3 +7,4 @@ export * from './economy.ts';
 export * from './protocol.ts';
 export * from './fortunes.ts';
 export * from './events.ts';
+export * from './puppetPlays.ts';

@@ -14,6 +14,7 @@ export const PlayerS = schema({
   lastInput: t.uint32().default(0), // 已处理的最后输入 seq（客户端重放校正）
   conn: t.boolean().default(true),
   orng: t.uint8().default(0), // 手上的旺桔（舞狮接到的）
+  lamp: t.boolean().default(false), // 百灯过桥：手上提着灯
 }, 'Player');
 export type PlayerS = SchemaType<typeof PlayerS>;
 
@@ -57,6 +58,8 @@ export const PlazaState = schema({
   incense: t.uint8().default(0), // 香炉里正在烧的香（束）
   vq: t.uint8().default(0), // 打小人排队人数
   evOff: t.float64().default(0), // 活动时钟偏移（只在本地测试时用）
+  ev: t.string().default(''), // 正在进行的活动（开估 / 布袋戏 / 百灯过桥）的公开进度（JSON）
+  lamps: t.uint16().default(0), // 石桥上点亮了哪几盏灯（位）
   oranges: t.array(OrangeS),
 }, 'PlazaState');
 export type PlazaState = SchemaType<typeof PlazaState>;

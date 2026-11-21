@@ -2,7 +2,7 @@ import { Room, type Client } from '@colyseus/core';
 import { randomUUID } from 'node:crypto';
 import {
   EMOTES, GAME_CONFIG, CONFIG_VERSION, MSG, PSTATE, SEAT_STATE, SEATS, SPAWN, COLLIDERS_SEATING, klDay,
-  MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES, RING, ringLanding, LION, lionElapsed, isBlocked, insideWalk,
+  MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES, RING, ringLanding, LION, lionElapsed, isBlocked, insideWalk, currentEvent, GUESS,
   stepMove, stepToward, sanitizeMove, normalizeTargetName, avatarToIndices, validateAvatar, DEFAULT_AVATAR,
   type SessionResult,
 } from '@nanyang/shared';
@@ -12,6 +12,7 @@ import { pool, tx } from '../db.ts';
 import { getWallet, spend, spendBoth, credit, refund, placeMamakOrder, setOrderStatus } from '../wallet.ts';
 import { hitPipeline, leaderboard, upsertTarget, sealSession, getSessionResult } from '../hits.ts';
 import { metrics } from '../metrics.ts';
+import { StreetEvents } from '../streetEvents.ts';
 
 const V = GAME_CONFIG.villain;
 const WF = GAME_CONFIG.woodfish;
@@ -23,7 +24,7 @@ type MenuItem = (typeof MK.menu)[number];
 type OrderStatus = 'ordered' | 'cooking' | 'serving' | 'delivered' | 'eating' | 'done' | 'cancelled';
 interface MamakOrder { id: string; requestId: string; it: Internal; seatId: number; item: MenuItem; status: OrderStatus; eatTimer?: NodeJS.Timeout }
 interface StaffTask { kind: 'visit' | 'deliver'; seatId: number; order?: MamakOrder }
-type StaffPhase = 'idle' | 'walk' | 'ask' | 'cook' | 'place' | 'return';
+type StaffPhase = 'idle' | 'walk' | 'ask' | 'cook' | 'place' | 'return' | 'host';
 /** Aneh 走的通道：两排桌子中间（x=-2.9）和街边（x=-0.2），不穿桌子 */
 const AISLES = [{ x: -2.9, z: 18.15 }, { x: -0.2, z: 18.15 }, { x: -0.2, z: 14.6 }, { x: -3.2, z: 14.4 }, { x: 0.4, z: 20.6 }, { x: 3.4, z: 20.6 }, { x: 0.4, z: 16.2 }, { x: 3.4, z: 16.2 }];
 const COUNTER = { x: MAMAK_SHOP.counterX, z: MAMAK_SHOP.counterZ };
@@ -96,6 +97,11 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   private staff: { task: StaffTask | null; phase: StaffPhase; path: Array<{ x: number; z: number }>; until: number } = { task: null, phase: 'idle', path: [], until: 0 };
   private incense: number[] = [];
   private orangeHour = -1;
+  private street = new StreetEvents({
+    state: this.state as never, clients: this.clients as never,
+    playerIdOf: (sid) => this.internal.get(sid)?.playerId,
+    broadcast: (t, m) => this.broadcast(t, m),
+  });
   private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
   private vQueue: string[] = [];
@@ -114,6 +120,14 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     });
     const lastChat = new Map<string, number>();
     this.onMessage('villain.queue', (client) => this.onVillainQueue(client));
+    this.onMessage('guess.answer', (client, m: { v?: unknown }) => client.send('guess.ack', { ok: this.street.answerGuess(client.sessionId, m?.v), v: m?.v }));
+    this.onMessage('puppet.vote', (client, m: { c?: unknown }) => client.send('puppet.ack', { ok: this.street.votePuppet(client.sessionId, m?.c), c: m?.c }));
+    this.onMessage('lamp.borrow', (client) => { this.street.borrowLamp(client.sessionId); });
+    // 本地测试：把活动时钟拨到“第 min 分 sec 秒”
+    this.onMessage('debug.clock', (_c, m: { min?: unknown; sec?: unknown }) => {
+      if (process.env.ALLOW_DEBUG !== '1' || typeof m?.min !== 'number') return;
+      const t = (Date.now() / 1000) % 3600; this.state.evOff = (m.min * 60 + (typeof m.sec === 'number' ? m.sec : 0) - t) * 1000; this.orangeHour = -1;
+    });
     this.onMessage('orange.give', (client, m: { to?: unknown }) => { void this.onOrangeGive(client, m); });
     // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
     this.onMessage('debug.lion', (_c, m: { at?: unknown }) => {
@@ -356,6 +370,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     }
     this.tickStaff(now);
     this.tickLion(now);
+    this.street.tick(now);
     for (const [seatId, until] of this.vHoldUntil) if (now > until) { // 轮到的人没来：给下一个
       const seat = this.state.seats[seatId]; this.vHoldUntil.delete(seatId);
       if (seat && seat.st === SEAT_STATE.FREE) { const who = seat.hold; seat.hold = ''; this.clients.find((c) => c.sessionId === who)?.send('villain.turn', { expired: true }); this.offerVillainSeat(seatId); }
@@ -1088,6 +1103,14 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       return false;
     };
     const faceSeat = (seatId: number) => { const s = SEATS[seatId]; A.yaw = Math.atan2(s.seat.x - A.x, s.seat.z - A.z); };
+    // :15 开估：Aneh 当档主，走到开估桌后面主持（手上的单做完才去）
+    const ev = currentEvent(now, this.state.evOff);
+    if (!st.task && ev?.id === 'guess' && ev.t < GUESS.revealS + 8) {
+      if (st.phase !== 'host') { st.phase = 'host' as StaffPhase; st.path = this.route({ x: A.x, z: A.z }, GUESS.host); }
+      if (walk()) { A.yaw = Math.PI / 2; A.act = 1; }
+      return;
+    }
+    if (st.phase === ('host' as StaffPhase)) { st.phase = 'return'; A.act = 0; st.path = this.route({ x: A.x, z: A.z }, COUNTER); }
     if (!st.task) {
       if (st.phase === 'return' && !this.staffQueue.length) { if (walk()) { st.phase = 'idle'; A.yaw = Math.PI / 2; } return; }
       const next = this.staffQueue.shift();

@@ -156,6 +156,10 @@ export const WALK_RECTS = [
   { minX: -6.2, maxX: 6.3, minZ: -2.4, maxZ: 24.6 }, // 主街（店屋到店屋）
   { minX: -2.9, maxX: 2.9, minZ: -4.6, maxZ: -2.4 }, // 牌坊中间
   { minX: -6.0, maxX: 6.2, minZ: -12.6, maxZ: -4.6 }, // 牌坊外的小广场
+  { minX: 5.6, maxX: 13.2, minZ: -6.6, maxZ: -1.8 }, // 灯笼巷（从主街往东，和主街接上）
+  { minX: 13.0, maxX: 18.6, minZ: -12.0, maxZ: 6.0 }, // 河边（近岸）
+  { minX: 18.2, maxX: 22.8, minZ: -2.55, maxZ: -1.45 }, // 石桥（栏杆之间）
+  { minX: 22.4, maxX: 25.6, minZ: -8.0, maxZ: 4.0 }, // 河对岸
   { minX: 6.3, maxX: 8.8, minZ: 12.0, maxZ: 24.6 }, // 姻缘树后面、月老庙旁
   { minX: -8.6, maxX: 9.0, minZ: 22.4, maxZ: 25.9 }, // 天后宫台阶前的广场（连通东西两区）
   { minX: ZEN_HALL.minX, maxX: ZEN_HALL.altarX - 0.8, minZ: ZEN_HALL.minZ + 0.4, maxZ: ZEN_HALL.maxZ - 0.4 },
@@ -166,8 +170,14 @@ export function insideWalk(x: number, z: number): boolean {
   return false;
 }
 
-/** 地面高度：只有下沉浴池里面是低的（台阶一路下到池底） */
+/** 石桥桥面高度（沿 x 拱起） */
+export const bridgeY = (x: number) => Math.max(0, Math.sin(Math.PI * (x - 18.2) / 4.6)) * 0.88;
+/** 石桥桥面：中间拱起 */
+export const BRIDGE_DECK = { x0: 18.2, x1: 22.8, z0: -2.65, z1: -1.35, rise: 0.88 };
+/** 地面高度：下沉浴池里面是低的（台阶一路下到池底）；石桥上是拱起来的 */
 export function groundY(x: number, z: number): number {
+  const B = BRIDGE_DECK;
+  if (x > B.x0 && x < B.x1 && z > B.z0 && z < B.z1) return bridgeY(x);
   for (const p of POOLS) {
     const r = Math.hypot(x - p.x, z - p.z);
     if (r < POOL_R - 0.12) {
@@ -190,6 +200,8 @@ export const COLLIDERS: Box[] = [
   b('censer', 'prop', CENSER.x, CENSER.z, 0.55, 0.55, 1.4),
   b('donation', 'prop', DONATION_BOX.x, DONATION_BOX.z, 0.32, 0.25, 0.8),
   b('signpost', 'prop', 2.7, 7.7, 0.7, 0.7, 1.0),
+  b('guessTable', 'table', -2.35, 22.75, 0.45, 0.45, 0.8), b('guessHost', 'npc', -3.15, 22.75, 0.25, 0.25, 1.5),
+  b('puppetStage', 'building', 8.55, 17.6, 0.7, 1.85, 3),
   b('qiuqian', 'table', QIUQIAN.x, QIUQIAN.z, 0.55, 0.28, 0.85),
   b('mingliDesk', 'table', 5.9, MINGLI.z, 0.25, 0.62, 0.75), b('mingliMaster', 'npc', MINGLI.masterX, MINGLI.z, 0.25, 0.3, 1.2),
   b('banyanTrunk', 'tree', 5.6, 14.5, 1.1, 1.1, 5),
