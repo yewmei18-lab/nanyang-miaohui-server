@@ -1,0 +1,47 @@
+import { schema, t, type SchemaType } from '@colyseus/schema';
+
+export const PlayerS = schema({
+  name: t.string().default(''),
+  av: t.string().default(''), // 角色配置索引，逗号分隔（服务器从数据库读取并校验）
+  x: t.float32().default(0),
+  z: t.float32().default(0),
+  yaw: t.float32().default(0),
+  speed: t.float32().default(0),
+  st: t.uint8().default(0), // PSTATE
+  seat: t.int8().default(-1),
+  actAt: t.float64().default(0), // 动作服务器开始时间
+  hitSeq: t.uint32().default(0), // 本局已接受击打次数（驱动他人看到的拍击动作）
+  lastInput: t.uint32().default(0), // 已处理的最后输入 seq（客户端重放校正）
+  conn: t.boolean().default(true),
+}, 'Player');
+export type PlayerS = SchemaType<typeof PlayerS>;
+
+export const SeatS = schema({
+  id: t.uint8().default(0),
+  st: t.uint8().default(0), // SEAT_STATE
+  by: t.string().default(''), // 占用者 sessionId
+  until: t.float64().default(0),
+  food: t.string().default(''), // MAMAK：桌上这个位置前面放着的食物（菜单 id）
+}, 'Seat');
+export type SeatS = SchemaType<typeof SeatS>;
+
+/** MAMAK 店员 Aneh（店员，不是玩家；不计入人数） */
+export const StaffS = schema({
+  x: t.float32().default(0),
+  z: t.float32().default(0),
+  yaw: t.float32().default(0),
+  speed: t.float32().default(0),
+  carry: t.string().default(''), // 手上端着的食物
+  act: t.uint8().default(0), // 0 走/站 1 在桌边问点什么 2 放下食物 3 在柜台准备
+  seat: t.int8().default(-1), // 正在服务的座位
+}, 'Staff');
+export type StaffS = SchemaType<typeof StaffS>;
+
+export const PlazaState = schema({
+  no: t.uint16().default(0), // 房间编号（庙会 01、02…）
+  players: t.map(PlayerS),
+  seats: t.array(SeatS),
+  aneh: StaffS,
+  incense: t.uint8().default(0), // 香炉里正在烧的香（束）
+}, 'PlazaState');
+export type PlazaState = SchemaType<typeof PlazaState>;
