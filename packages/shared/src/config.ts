@@ -79,6 +79,8 @@ export const GAME_CONFIG = {
   burn: { maxChars: 60, gapMs: 4000 },
   /** 打卡拍照：倒数 3 秒 */
   photo: { countdownMs: 3000, gapMs: 6000 },
+  /** 第 4 批：冰球 4 金币（3 分钟后吃完）；面具试戴免费，买下 15 金币；拉茶免费 */
+  street: { icePrice: 4, iceMs: 180_000, maskPrice: 15, teaMs: 120_000, blessMaxChars: 30, blessGapMs: 30_000, blessHideAfterReports: 3 },
   /** 天后宫：上香免费；香油钱（金币） */
   pray: { donateAmounts: [1, 6, 8, 18], incenseMs: 180_000, maxIncense: 9, incenseCooldownMs: 8_000 },
   leaderboard: {

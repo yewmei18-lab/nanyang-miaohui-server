@@ -63,6 +63,36 @@ export function mountHttp(app: express.Application) {
     res.json(await summary(who.playerId));
   });
 
+  // ── 祝福留言架：看最新的、留一句（预设或自己写 30 字内）、删除自己的、举报别人的（3 人举报就收起来） ──
+  const lastBless = new Map<string, number>();
+  app.get('/api/blessings', async (req, res) => {
+    const who = await verifyToken(bearer(req.headers.authorization));
+    const r = await pool.query(`SELECT b.id, b.text, b.created_at, p.nickname, (b.player_id = $1) AS mine FROM blessings b JOIN players p ON p.id=b.player_id
+      WHERE NOT b.hidden ORDER BY b.created_at DESC LIMIT 40`, [who?.playerId ?? '00000000-0000-0000-0000-000000000000']);
+    res.json({ items: r.rows.map((x) => ({ id: Number(x.id), text: x.text, nickname: x.nickname ?? '有人', mine: x.mine })) });
+  });
+  app.post('/api/blessings', async (req, res) => {
+    const who = await auth(req, res); if (!who) return;
+    const text = Array.from(String(req.body?.text ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim()).slice(0, GAME_CONFIG.street.blessMaxChars).join('');
+    if (!text) { res.status(400).json({ error: 'empty' }); return; }
+    const now = Date.now(); if (now - (lastBless.get(who.playerId) ?? 0) < GAME_CONFIG.street.blessGapMs) { res.status(429).json({ error: 'slow' }); return; }
+    lastBless.set(who.playerId, now);
+    const r = await pool.query('INSERT INTO blessings(player_id, text) VALUES ($1,$2) RETURNING id', [who.playerId, text]);
+    res.json({ ok: true, id: Number(r.rows[0].id) });
+  });
+  app.delete('/api/blessings/:id', async (req, res) => {
+    const who = await auth(req, res); if (!who) return;
+    const r = await pool.query('DELETE FROM blessings WHERE id=$1 AND player_id=$2', [Number(req.params.id) || 0, who.playerId]);
+    res.json({ ok: !!r.rowCount });
+  });
+  app.post('/api/blessings/:id/report', async (req, res) => {
+    const who = await auth(req, res); if (!who) return;
+    const id = Number(req.params.id) || 0;
+    await pool.query('INSERT INTO blessing_reports(blessing_id, player_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, who.playerId]).catch(() => {});
+    await pool.query(`UPDATE blessings SET hidden=true WHERE id=$1 AND (SELECT count(*) FROM blessing_reports WHERE blessing_id=$1) >= $2`, [id, GAME_CONFIG.street.blessHideAfterReports]);
+    res.json({ ok: true });
+  });
+
   app.get('/api/me', async (req, res) => {
     const who = await auth(req, res); if (!who) return;
     const a = await pool.query('SELECT config_json, version FROM avatars WHERE player_id=$1', [who.playerId]);

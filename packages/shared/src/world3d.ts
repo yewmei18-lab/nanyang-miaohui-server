@@ -64,6 +64,33 @@ export function ringLanding(a: number, p: number) {
   const d = 0.6 + pp * 4.4;
   return { x: RING.origin.x + Math.cos(aa) * d, z: RING.origin.z + Math.sin(aa) * d };
 }
+/** 第 4 批：夜市街、童玩、灯笼巷、水边、戏台后台、入口的小地方（不坐下，走近就能玩） */
+export type SpotKind = 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat';
+export interface Spot { id: string; kind: SpotKind; x: number; z: number; r: number; label: string; face: number }
+export const SPOTS: Spot[] = [
+  { id: 'tea', kind: 'tea', x: -16.4, z: 17.0, r: 2.2, label: '拉一杯茶', face: Math.PI / 2 },
+  { id: 'ice', kind: 'ice', x: -16.4, z: 11.0, r: 2.2, label: '做双色冰球', face: Math.PI / 2 },
+  { id: 'mask', kind: 'mask', x: -16.4, z: 5.0, r: 2.2, label: '试戴面具', face: Math.PI / 2 },
+  { id: 'paper', kind: 'paper', x: -13.5, z: 14.0, r: 1.8, label: '掀开一张红纸', face: -Math.PI / 2 },
+  { id: 'batu', kind: 'batu', x: -13.6, z: 20.0, r: 1.8, label: '玩五粒子', face: -Math.PI / 2 },
+  { id: 'eraser', kind: 'eraser', x: -9.0, z: -4.2, r: 1.8, label: '斗擦胶', face: 0 },
+  { id: 'marble', kind: 'marble', x: -11.9, z: -2.4, r: 1.6, label: '玩弹珠台', face: Math.PI },
+  { id: 'hop', kind: 'hop', x: -15.3, z: -6.0, r: 1.4, label: '跳飞机', face: 0 },
+  { id: 'wishrack', kind: 'wishrack', x: 10.4, z: -6.3, r: 1.8, label: '看祝福、留一句话', face: Math.PI },
+  { id: 'shadow', kind: 'shadow', x: 11.6, z: -2.2, r: 2.0, label: '玩手影', face: 0 },
+  { id: 'fish', kind: 'fish', x: 18.0, z: -4.2, r: 1.8, label: '撒鱼粮', face: Math.PI / 2 },
+  { id: 'backstage', kind: 'backstage', x: 10.2, z: 17.6, r: 1.8, label: '拉开布帘', face: -Math.PI / 2 },
+  { id: 'drum', kind: 'drum', x: 15.5, z: 2.3, r: 1.8, label: '跟鼓师学三拍', face: 0 },
+  { id: 'rain', kind: 'rain', x: 10.2, z: 29.1, r: 1.3, label: '敲水缸听雨', face: -Math.PI / 2 },
+  { id: 'photowall', kind: 'photowall', x: 4.9, z: -4.6, r: 1.8, label: '看老照片', face: 0 },
+  { id: 'stamp', kind: 'stamp', x: 2.6, z: -1.3, r: 1.5, label: '领游园纸、盖章', face: 0 },
+  { id: 'board', kind: 'board', x: 3.3, z: 3.6, r: 1.6, label: '看今日庙会', face: -Math.PI / 2 },
+];
+/** 橘猫每天藏的地方（按马来西亚日期轮换） */
+export const CAT_SPOTS = [
+  { x: -1.1, z: 16.1, where: 'Mamak 的红凳上' }, { x: 12.6, z: -5.9, where: '灯笼巷的灯笼箱旁' }, { x: 9.9, z: 16.2, where: '戏台后面' },
+  { x: 23.6, z: -3.6, where: '石桥对岸' }, { x: -12.4, z: 31.5, where: '洗衰运的花砖边' }, { x: -15.0, z: 8.0, where: '夜市街的冰球档下' }, { x: 4.3, z: 12.6, where: '姻缘树下' },
+];
 /** 打小人摊的婆婆：摊位北头，坐在蒲团上面向街，自己有一块砖台 */
 export const POPO = { x: -3.3, z: 13.85, yaw: Math.PI / 2, brickX: -2.62 };
 /** 今日小人榜木牌 */
@@ -157,6 +184,9 @@ export const WALK_RECTS = [
   { minX: -2.9, maxX: 2.9, minZ: -4.6, maxZ: -2.4 }, // 牌坊中间
   { minX: -6.0, maxX: 6.2, minZ: -12.6, maxZ: -4.6 }, // 牌坊外的小广场
   { minX: 5.6, maxX: 13.2, minZ: -6.6, maxZ: -1.8 }, // 灯笼巷（从主街往东，和主街接上）
+  { minX: -13.2, maxX: -5.6, minZ: -6.6, maxZ: -1.8 }, // 童玩巷（从主街往西）
+  { minX: -17.6, maxX: -13.0, minZ: -6.6, maxZ: 23.4 }, // Mamak 夜市街（一路通到洗衰运）
+  { minX: 8.6, maxX: 10.8, minZ: 15.0, maxZ: 20.6 }, // 戏台后台
   { minX: 13.0, maxX: 18.6, minZ: -12.0, maxZ: 6.0 }, // 河边（近岸）
   { minX: 18.2, maxX: 22.8, minZ: -2.55, maxZ: -1.45 }, // 石桥（栏杆之间）
   { minX: 22.4, maxX: 25.6, minZ: -8.0, maxZ: 4.0 }, // 河对岸
@@ -200,6 +230,14 @@ export const COLLIDERS: Box[] = [
   b('censer', 'prop', CENSER.x, CENSER.z, 0.55, 0.55, 1.4),
   b('donation', 'prop', DONATION_BOX.x, DONATION_BOX.z, 0.32, 0.25, 0.8),
   b('signpost', 'prop', 2.7, 7.7, 0.7, 0.7, 1.0),
+  // 第 4 批的摊位和小东西
+  ...[17.0, 11.0, 5.0, 0.0].map((z, i) => b(`nightStall${i}`, 'building', -17.4, z, 0.6, 1.3, 2.5)),
+  b('paperRack', 'prop', -12.9, 14.0, 0.25, 0.9, 1.8), b('batuTable', 'table', -12.9, 20.0, 0.35, 0.45, 0.5),
+  b('eraserTable', 'table', -9.0, -4.2, 0.55, 0.4, 0.8), b('marbleBoard', 'prop', -11.9, -1.95, 0.45, 0.25, 1.0),
+  b('wishRack', 'prop', 10.4, -6.75, 1.1, 0.2, 1.8), b('shadowLamp', 'prop', 13.05, -2.15, 0.15, 0.15, 1.6), b('shadowWall', 'building', 11.6, -1.75, 1.3, 0.12, 2.6),
+  b('drumRack', 'prop', 15.5, 3.1, 0.35, 0.35, 1.2), b('photoWall', 'building', 4.9, -3.95, 1.3, 0.15, 2.4),
+  b('stampTable', 'table', 2.6, -0.55, 0.45, 0.3, 0.8), b('fairBoard', 'prop', 4.15, 3.6, 0.2, 0.55, 2.0),
+  ...[28.3, 29.1, 29.9].map((z, i) => b(`rainJar${i}`, 'prop', 9.45, z, 0.22, 0.22, 0.6)),
   b('guessTable', 'table', -2.35, 22.75, 0.45, 0.45, 0.8), b('guessHost', 'npc', -3.15, 22.75, 0.25, 0.25, 1.5),
   b('puppetStage', 'building', 8.55, 17.6, 0.7, 1.85, 3),
   b('qiuqian', 'table', QIUQIAN.x, QIUQIAN.z, 0.55, 0.28, 0.85),

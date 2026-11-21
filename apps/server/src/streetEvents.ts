@@ -12,6 +12,7 @@ export interface EventHost {
   clients: Client[];
   playerIdOf(sid: string): string | undefined;
   broadcast(type: string, msg: unknown): void;
+  stamp?(sid: string, stamp: string): void;
 }
 
 interface GuessRound { hour: number; kind: GuessKind; n: number; removed: number; items: string[]; start: number; swaps: Array<[number, number]>; answer: number; answers: Map<string, number>; revealed: boolean }
@@ -113,11 +114,11 @@ export class StreetEvents {
   private tickBridgeLamps(now: number, lanternEvent: boolean) {
     if (this.wasLantern && !lanternEvent) { this.room.state.lamps = 0; }
     this.wasLantern = lanternEvent;
-    for (const p of this.room.state.players.values()) {
+    for (const [sid, p] of this.room.state.players) {
       if (p.st !== PSTATE.MOVING) continue;
       BRIDGE_LAMPS.forEach((l, i) => {
         if (!(this.room.state.lamps & (1 << i)) && Math.hypot(p.x - l.x, p.z - l.z) < 0.9) {
-          this.room.state.lamps |= 1 << i; this.lampsLitAt = now;
+          this.room.state.lamps |= 1 << i; this.lampsLitAt = now; this.room.stamp?.(sid, 'bridge');
           if (this.room.state.lamps === (1 << BRIDGE_LAMPS.length) - 1) this.room.broadcast('bridge.full', { during: lanternEvent });
         }
       });

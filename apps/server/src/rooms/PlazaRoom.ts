@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   EMOTES, GAME_CONFIG, CONFIG_VERSION, MSG, PSTATE, SEAT_STATE, SEATS, SPAWN, COLLIDERS_SEATING, klDay,
   MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES, RING, ringLanding, LION, lionElapsed, isBlocked, insideWalk, currentEvent, GUESS,
+  SPOTS, SYRUPS, MASKS, GOOD_WORDS, STAMPS, CAT_SPOTS, dayIndex,
   stepMove, stepToward, sanitizeMove, normalizeTargetName, avatarToIndices, validateAvatar, DEFAULT_AVATAR,
   type SessionResult,
 } from '@nanyang/shared';
@@ -101,6 +102,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     state: this.state as never, clients: this.clients as never,
     playerIdOf: (sid) => this.internal.get(sid)?.playerId,
     broadcast: (t, m) => this.broadcast(t, m),
+    stamp: (sid, st) => { void this.stamp(sid, st); },
   });
   private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
@@ -127,6 +129,82 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.onMessage('debug.clock', (_c, m: { min?: unknown; sec?: unknown }) => {
       if (process.env.ALLOW_DEBUG !== '1' || typeof m?.min !== 'number') return;
       const t = (Date.now() / 1000) % 3600; this.state.evOff = (m.min * 60 + (typeof m.sec === 'number' ? m.sec : 0) - t) * 1000; this.orangeHour = -1;
+    });
+    // ── 第 4 批：街上的小东西 ──
+    const near = (sid: string, kind: string) => { const p = this.state.players.get(sid); const sp = SPOTS.find((x) => x.kind === kind); return !!p && !!sp && p.st === PSTATE.MOVING && Math.hypot(p.x - sp.x, p.z - sp.z) < sp.r + 0.8; };
+    const holdTimers = new Map<string, NodeJS.Timeout>();
+    const setHold = (sid: string, v: string, ms: number) => { const p = this.state.players.get(sid); if (!p) return; p.hold = v; clearTimeout(holdTimers.get(sid)); holdTimers.set(sid, setTimeout(() => { const q = this.state.players.get(sid); if (q && q.hold === v) q.hold = ''; }, ms)); };
+    this.onMessage('tea.done', (client, m: { score?: unknown }) => {
+      if (!near(client.sessionId, 'tea')) return;
+      setHold(client.sessionId, 'tea', GAME_CONFIG.street.teaMs); void this.stamp(client.sessionId, 'night');
+      this.broadcast('act', { sid: client.sessionId, a: 'tea', score: typeof m?.score === 'number' ? Math.max(0, Math.min(100, Math.round(m.score))) : 0 });
+    });
+    this.onMessage('ice.buy', async (client, m: { a?: unknown; b?: unknown; requestId?: unknown }) => {
+      const it = this.internal.get(client.sessionId); const a = SYRUPS.find((x) => x.id === m?.a), b = SYRUPS.find((x) => x.id === m?.b);
+      const rid = typeof m?.requestId === 'string' ? m.requestId.slice(0, 64) : '';
+      if (!it || !a || !b || !rid || !near(client.sessionId, 'ice')) return client.send('ice.result', { ok: false, reason: 'not_here' });
+      try {
+        const r = await spend(it.playerId, 'coins', GAME_CONFIG.street.icePrice, 'ice_ball', rid, `ice:${it.playerId}:${rid}`);
+        if (!r.ok) return client.send('ice.result', { ok: false, reason: 'insufficient' });
+        client.send(MSG.S_WALLET, r.wallet); client.send('ice.result', { ok: true });
+        if (!r.replay) { setHold(client.sessionId, `ice:${a.color},${b.color}`, GAME_CONFIG.street.iceMs); void this.stamp(client.sessionId, 'night'); }
+      } catch { client.send('ice.result', { ok: false, reason: 'db_unavailable' }); }
+    });
+    this.onMessage('mask.try', (client, m: { id?: unknown }) => {
+      const p = this.state.players.get(client.sessionId); if (!p || !near(client.sessionId, 'mask')) return;
+      p.mask = MASKS.some((x) => x.id === m?.id) ? String(m.id) : '';
+    });
+    this.onMessage('mask.buy', async (client, m: { id?: unknown }) => {
+      const it = this.internal.get(client.sessionId); const mk = MASKS.find((x) => x.id === m?.id);
+      if (!it || !mk || !near(client.sessionId, 'mask')) return;
+      const owned = await pool.query('SELECT 1 FROM player_items WHERE player_id=$1 AND item=$2', [it.playerId, `mask:${mk.id}`]);
+      if (owned.rowCount) return client.send('mask.result', { ok: true, id: mk.id, already: true });
+      try {
+        const r = await spend(it.playerId, 'coins', GAME_CONFIG.street.maskPrice, 'mask', mk.id, `mask:${it.playerId}:${mk.id}`);
+        if (!r.ok) return client.send('mask.result', { ok: false, reason: 'insufficient' });
+        await pool.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,$2,1) ON CONFLICT DO NOTHING`, [it.playerId, `mask:${mk.id}`]);
+        client.send(MSG.S_WALLET, r.wallet); client.send('mask.result', { ok: true, id: mk.id });
+      } catch { client.send('mask.result', { ok: false, reason: 'db_unavailable' }); }
+    });
+    /** 戴自己买过的面具（任何地方都能戴/脱）；没买过的只能在面具档试戴 */
+    this.onMessage('mask.wear', async (client, m: { id?: unknown }) => {
+      const it = this.internal.get(client.sessionId); const p = this.state.players.get(client.sessionId); if (!it || !p) return;
+      if (!m?.id) { p.mask = ''; return; }
+      const owned = await pool.query('SELECT 1 FROM player_items WHERE player_id=$1 AND item=$2', [it.playerId, `mask:${String(m.id)}`]);
+      if (owned.rowCount) p.mask = String(m.id);
+    });
+    this.onMessage('items.get', async (client) => {
+      const it = this.internal.get(client.sessionId); if (!it) return;
+      const r = await pool.query('SELECT item, qty FROM player_items WHERE player_id=$1 AND qty > 0', [it.playerId]).catch(() => null);
+      client.send('items', { items: Object.fromEntries((r?.rows ?? []).map((x: { item: string; qty: number }) => [x.item, x.qty])) });
+    });
+    this.onMessage('paper.pull', (client) => {
+      const it = this.internal.get(client.sessionId); if (!it || !near(client.sessionId, 'paper')) return;
+      const day = klDay(Date.now()); const h = [...it.playerId].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+      client.send('paper', { text: GOOD_WORDS[(dayIndex(day) + h) % GOOD_WORDS.length], day });
+      void this.stamp(client.sessionId, 'night');
+    });
+    this.onMessage('hat.pick', (client, m: { h?: unknown }) => { if (near(client.sessionId, 'backstage') && (m?.h === 'red' || m?.h === 'straw')) { this.state.hat = m.h; this.broadcast('act', { sid: client.sessionId, a: 'hat', h: m.h }); void this.stamp(client.sessionId, 'stage'); } });
+    this.onMessage('cat.pet', (client) => {
+      const p = this.state.players.get(client.sessionId); if (!p) return;
+      const c = CAT_SPOTS[dayIndex(klDay(Date.now())) % CAT_SPOTS.length];
+      if (Math.hypot(p.x - c.x, p.z - c.z) > 2.2) return;
+      this.broadcast('act', { sid: client.sessionId, a: 'catpet' }); void this.stamp(client.sessionId, 'cat');
+    });
+    this.onMessage('stamps.get', async (client) => {
+      const it = this.internal.get(client.sessionId); if (!it) return;
+      const r = await pool.query('SELECT stamp FROM stamps WHERE player_id=$1 AND day=$2', [it.playerId, klDay(Date.now())]).catch(() => null);
+      client.send('stamps', { day: klDay(Date.now()), stamps: (r?.rows ?? []).map((x: { stamp: string }) => x.stamp) });
+    });
+    // 只给附近的人看的小动作（童玩、手影、鱼、鼓、水缸、五粒子）：服务器只转发，不记账
+    const lastFx = new Map<string, number>();
+    this.onMessage('fx', (client, m: { k?: unknown; v?: unknown; x?: unknown; z?: unknown }) => {
+      const k = typeof m?.k === 'string' ? m.k : ''; if (!['eraser', 'marble', 'hop', 'shadow', 'fish', 'drum', 'rain', 'batu'].includes(k)) return;
+      const now = Date.now(); if (now - (lastFx.get(client.sessionId) ?? 0) < 150) return; lastFx.set(client.sessionId, now);
+      const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(x * 100) / 100 : 0);
+      this.broadcast('fx', { sid: client.sessionId, k, v: typeof m?.v === 'string' ? m.v.slice(0, 16) : num(m?.v), x: num(m?.x), z: num(m?.z) });
+      if (k === 'eraser' || k === 'marble' || k === 'hop' || k === 'batu') void this.stamp(client.sessionId, 'kids');
+      if (k === 'drum') void this.stamp(client.sessionId, 'bridge');
     });
     this.onMessage('orange.give', (client, m: { to?: unknown }) => { void this.onOrangeGive(client, m); });
     // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
@@ -365,6 +443,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
         const seat = this.state.seats[p.seat]; if (seat) { seat.st = SEAT_STATE.OCCUPIED; seat.until = 0; }
         if (SEATS[p.seat]?.kind === 'bath') it.bath = { id: randomUUID(), activeMs: 0, lastBeat: now, minute: 0, lastTick: now };
         if (SEATS[p.seat]?.kind === 'mamak' && !it.order) this.enqueueVisit(p.seat, sid);
+        { const k = SEATS[p.seat]?.kind; const st = k === 'fortune' ? 'pray' : k === 'burn' || k === 'lantern' ? 'kids' : k === 'ring' ? 'kids' : k; void this.stamp(sid, String(st)); }
       } else if (p.st === PSTATE.STANDING) this.tickStanding(sid, p, it, now);
       if (it.bath) this.tickBath(sid, p, it, now);
     }
@@ -802,6 +881,12 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       }
     }
   }
+  /** 游园纸：今天逛过的地方盖章（马来西亚日期，一天一张） */
+  async stamp(sid: string, stamp: string) {
+    const it = this.internal.get(sid); if (!it || !STAMPS.some((x) => x.id === stamp)) return;
+    const r = await pool.query(`INSERT INTO stamps(player_id, day, stamp) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING stamp`, [it.playerId, klDay(Date.now()), stamp]).catch(() => null);
+    if (r?.rowCount) this.clients.find((c) => c.sessionId === sid)?.send('stamp.new', { stamp });
+  }
   /** 第一次玩免费：每个账号每种玩法一次（原子领取，连点也只算一次） */
   private async claimFreeTry(playerId: string, game: string): Promise<boolean> {
     const r = await pool.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,$2,1) ON CONFLICT DO NOTHING RETURNING qty`, [playerId, `freetry:${game}`]);
@@ -930,7 +1015,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const now = Date.now(); if (now - a.it.lastPhoto < GAME_CONFIG.photo.gapMs) return;
     const sids: string[] = [];
     for (const s of SEATS) if (s.kind === 'photo') { const seat = this.state.seats[s.id]; if (seat?.by && seat.st === SEAT_STATE.OCCUPIED) sids.push(seat.by); }
-    for (const sid of sids) { const it = this.internal.get(sid); if (it) it.lastPhoto = now; }
+    for (const sid of sids) { const it = this.internal.get(sid); if (it) it.lastPhoto = now; void this.stamp(sid, 'photo'); }
     this.broadcast('photo', { captureId: randomUUID(), at: now + GAME_CONFIG.photo.countdownMs, sids });
   }
 
