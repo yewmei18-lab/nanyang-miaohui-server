@@ -2,14 +2,14 @@ import { Room, type Client } from '@colyseus/core';
 import { randomUUID } from 'node:crypto';
 import {
   EMOTES, GAME_CONFIG, CONFIG_VERSION, MSG, PSTATE, SEAT_STATE, SEATS, SPAWN, COLLIDERS_SEATING, klDay,
-  MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES,
+  MAMAK_SHOP, MAMAK_TABLES, CHAT, cleanChat, FORTUNES, RING, ringLanding,
   stepMove, stepToward, sanitizeMove, normalizeTargetName, avatarToIndices, validateAvatar, DEFAULT_AVATAR,
   type SessionResult,
 } from '@nanyang/shared';
 import { PlazaState, PlayerS, SeatS } from './schema.ts';
 import { verifyToken } from '../auth.ts';
 import { pool } from '../db.ts';
-import { getWallet, spend, credit, refund, placeMamakOrder, setOrderStatus } from '../wallet.ts';
+import { getWallet, spend, spendBoth, credit, refund, placeMamakOrder, setOrderStatus } from '../wallet.ts';
 import { hitPipeline, leaderboard, upsertTarget, sealSession, getSessionResult } from '../hits.ts';
 import { metrics } from '../metrics.ts';
 
@@ -75,6 +75,10 @@ interface Internal {
   lastIncense: number;
   /** 这次坐下已经打过几局（后面有人排队时只能打一局） */
   vPlayed: number;
+  /** 天灯、烧烦恼、拍照：同一个 requestId 只处理一次；上次时间（防连点） */
+  done: Map<string, unknown>; lastBurn: number; lastPhoto: number;
+  /** 套圈这一局 */
+  ring: { id: string; left: number; claimed: Set<number>; endsAt: number; lastThrow: number; won: number; seen: Set<number> } | null;
 }
 
 export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
@@ -88,6 +92,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   private staffQueue: StaffTask[] = [];
   private staff: { task: StaffTask | null; phase: StaffPhase; path: Array<{ x: number; z: number }>; until: number } = { task: null, phase: 'idle', path: [], until: 0 };
   private incense: number[] = [];
+  private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
   private vQueue: string[] = [];
   private vHoldUntil = new Map<number, number>();
@@ -105,6 +110,11 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     });
     const lastChat = new Map<string, number>();
     this.onMessage('villain.queue', (client) => this.onVillainQueue(client));
+    this.onMessage('burn.throw', (client, m: { text?: unknown }) => this.onBurn(client, m));
+    this.onMessage('lantern.launch', (client, m: { requestId?: unknown; text?: unknown; pub?: unknown }) => { void this.onLantern(client, m); });
+    this.onMessage('ring.start', (client, m: { requestId?: unknown }) => { void this.onRingStart(client, m); });
+    this.onMessage('ring.throw', (client, m: { seq?: unknown; a?: unknown; p?: unknown }) => { void this.onRingThrow(client, m); });
+    this.onMessage('photo.shoot', (client) => this.onPhoto(client));
     this.onMessage('villain.unqueue', (client) => this.leaveVillainQueue(client.sessionId));
     this.onMessage('chat', (client, m: { t?: unknown }) => {
       const text = cleanChat(m?.t); if (!text) return;
@@ -185,7 +195,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const it: Internal = {
       playerId: auth.playerId, inputs: [], credit: 0, seatRequests: new Map(), path: [], pathDeadline: 0,
       stateBeforeDrop: PSTATE.MOVING, session: null, sessionRequests: new Map(), superseded: false,
-      wf: { seen: new Set(), window: [], today: 0, pending: 0, loaded: false }, bath: null, order: null, orderBusy: null, lastIncense: 0, vPlayed: 0, fortunes: new Map(), lastShake: 0,
+      wf: { seen: new Set(), window: [], today: 0, pending: 0, loaded: false }, bath: null, order: null, orderBusy: null, lastIncense: 0, vPlayed: 0, done: new Map(), lastBurn: 0, lastPhoto: 0, ring: null, fortunes: new Map(), lastShake: 0,
     };
     if (takeover && takeover.p) {
       const o = takeover.p;
@@ -217,6 +227,9 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     try { client.send(MSG.S_WALLET, await getWallet(auth.playerId)); } catch { /* */ }
     if (leaderboard.latest) client.send(MSG.S_LEADERBOARD, leaderboard.latest);
     if (it.session) this.sendSessionState(client, it.session);
+    // 天上还在飞的天灯（只给灯，不给别人的愿望文字，除非公开）
+    const now = Date.now(); this.lanterns = this.lanterns.filter((l) => now - l.t0 < GAME_CONFIG.lantern.flightMs);
+    for (const l of this.lanterns) client.send('lantern', { ...l, wish: l.pub ? l.wish : undefined, mine: false });
   }
 
   onDrop(client: Client) {
@@ -715,6 +728,98 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
         client.send('bath.reward', { energy, coins, coinsToday, coinCap: BATH.dailyCoinCap });
       }
     } catch (e) { console.warn('[bath] reward failed', (e as Error).message); }
+  }
+
+  // ───────────────────── 烧掉烦恼、天灯、套圈、拍照 ─────────────────────
+
+  private standingAt(client: Client, kind: string) {
+    const it = this.internal.get(client.sessionId); const p = this.state.players.get(client.sessionId);
+    if (!it || !p || p.seat < 0 || SEATS[p.seat]?.kind !== kind || p.st !== PSTATE.SEATED_IDLE) return null;
+    return { it, p };
+  }
+
+  /** 烧烦恼：写的字不保存、不广播；别人只看到纸丢进炉子烧起来 */
+  private onBurn(client: Client, m: { text?: unknown }) {
+    const a = this.standingAt(client, 'burn'); if (!a) return;
+    const t = cleanChat(typeof m?.text === 'string' ? m.text.slice(0, GAME_CONFIG.burn.maxChars * 2) : '');
+    if (!t) return;
+    const now = Date.now(); if (now - a.it.lastBurn < GAME_CONFIG.burn.gapMs) return; a.it.lastBurn = now;
+    this.broadcast('act', { sid: client.sessionId, a: 'burn', seat: a.p.seat });
+  }
+
+  private async onLantern(client: Client, m: { requestId?: unknown; text?: unknown; pub?: unknown }) {
+    const LT = GAME_CONFIG.lantern;
+    const a = this.standingAt(client, 'lantern');
+    const requestId = typeof m?.requestId === 'string' ? m.requestId.slice(0, 64) : '';
+    if (!requestId) return;
+    if (!a) return client.send('lantern.result', { requestId, ok: false, reason: 'not_here' });
+    const prev = a.it.done.get(requestId); if (prev) return client.send('lantern.result', prev);
+    const wish = Array.from(String(m?.text ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim()).slice(0, LT.wishMaxChars).join('');
+    if (!wish) return client.send('lantern.result', { requestId, ok: false, reason: 'empty' });
+    const id = randomUUID();
+    let r;
+    try { r = await spend(a.it.playerId, 'coins', LT.price, 'sky_lantern', id, `lantern:${a.it.playerId}:${requestId}`); } catch { return client.send('lantern.result', { requestId, ok: false, reason: 'db_unavailable' }); }
+    if (!r.ok) return client.send('lantern.result', { requestId, ok: false, reason: 'insufficient', wallet: r.wallet });
+    client.send(MSG.S_WALLET, r.wallet);
+    const res = { requestId, ok: true, launchId: id }; a.it.done.set(requestId, res); if (a.it.done.size > 40) a.it.done.delete(a.it.done.keys().next().value!);
+    client.send('lantern.result', res);
+    if (r.replay) return;
+    const def = SEATS[a.p.seat];
+    const l = { id, sid: client.sessionId, x: def.hit.x, z: def.hit.z, t0: Date.now() + 1500, wish, pub: m?.pub === true, seed: Math.random() };
+    this.lanterns.push(l); while (this.lanterns.length > LT.maxInSky) this.lanterns.shift();
+    for (const c of this.clients) c.send('lantern', { ...l, wish: l.pub || c.sessionId === client.sessionId ? wish : undefined, mine: c.sessionId === client.sessionId });
+  }
+
+  private async onRingStart(client: Client, m: { requestId?: unknown }) {
+    const RG = GAME_CONFIG.ring;
+    const a = this.standingAt(client, 'ring');
+    const requestId = typeof m?.requestId === 'string' ? m.requestId.slice(0, 64) : '';
+    if (!requestId) return;
+    if (!a) return client.send('ring.state', { requestId, ok: false, reason: 'not_here' });
+    if (a.it.ring && Date.now() < a.it.ring.endsAt && a.it.ring.left > 0) return client.send('ring.state', { requestId, ok: false, reason: 'running' });
+    const id = randomUUID();
+    let r;
+    try { r = await spendBoth(a.it.playerId, RG.coins, RG.energy, 'ring_toss', id, `ring:${a.it.playerId}:${requestId}`); } catch { return client.send('ring.state', { requestId, ok: false, reason: 'db_unavailable' }); }
+    if (!r.ok) return client.send('ring.state', { requestId, ok: false, reason: 'insufficient', wallet: r.wallet });
+    client.send(MSG.S_WALLET, r.wallet);
+    if (r.replay) return;
+    a.it.ring = { id, left: RG.rings, claimed: new Set(), endsAt: Date.now() + RG.sessionMs, lastThrow: 0, won: 0, seen: new Set() };
+    client.send('ring.state', { requestId, ok: true, sessionId: id, left: RG.rings, endsAt: a.it.ring.endsAt, won: 0, claimed: [] });
+  }
+
+  /** 套圈判定：服务器用同一个公式算落点（没有随机），落点离柱子够近就算套中 */
+  private async onRingThrow(client: Client, m: { seq?: unknown; a?: unknown; p?: unknown }) {
+    const RG = GAME_CONFIG.ring;
+    const st = this.standingAt(client, 'ring'); const g = st?.it.ring;
+    if (!st || !g) return;
+    const seq = typeof m?.seq === 'number' && Number.isInteger(m.seq) ? m.seq : 0;
+    if (!seq || g.seen.has(seq)) return;
+    const now = Date.now();
+    if (g.left <= 0 || now > g.endsAt + 500) return client.send('ring.result', { seq, ok: false, reason: 'ended' });
+    if (now - g.lastThrow < RG.throwGapMs) return client.send('ring.result', { seq, ok: false, reason: 'slow' });
+    const ang = typeof m?.a === 'number' && Number.isFinite(m.a) ? m.a : 0, pow = typeof m?.p === 'number' && Number.isFinite(m.p) ? m.p : 0;
+    g.seen.add(seq); g.lastThrow = now; g.left--;
+    const land = ringLanding(ang, pow);
+    let hit = -1;
+    RING.pegs.forEach((pg, i) => { if (hit < 0 && Math.hypot(land.x - pg.x, land.z - pg.z) < RING.ringR - RING.pegR) hit = i; });
+    let coins = 0;
+    if (hit >= 0 && !g.claimed.has(hit)) {
+      g.claimed.add(hit);
+      try { const r = await credit(st.it.playerId, 'coins', RING.pegs[hit].coins, 'ring_prize', g.id, `ringprize:${g.id}:${hit}`); coins = r.applied; g.won += coins; client.send(MSG.S_WALLET, r.wallet); } catch { /* 记账失败：不报中奖金额 */ }
+    }
+    this.broadcast('ring', { sid: client.sessionId, seq, a: ang, p: pow, x: land.x, z: land.z, hit });
+    client.send('ring.result', { seq, ok: true, hit, coins, left: g.left, won: g.won, claimed: [...g.claimed] });
+    if (g.left <= 0) client.send('ring.state', { ok: true, sessionId: g.id, left: 0, endsAt: g.endsAt, won: g.won, done: true, claimed: [...g.claimed] });
+  }
+
+  /** 拍照：同一个拍照点上的人一起拍（同一时间点各自截取真实 3D 画面） */
+  private onPhoto(client: Client) {
+    const a = this.standingAt(client, 'photo'); if (!a) return;
+    const now = Date.now(); if (now - a.it.lastPhoto < GAME_CONFIG.photo.gapMs) return;
+    const sids: string[] = [];
+    for (const s of SEATS) if (s.kind === 'photo') { const seat = this.state.seats[s.id]; if (seat?.by && seat.st === SEAT_STATE.OCCUPIED) sids.push(seat.by); }
+    for (const sid of sids) { const it = this.internal.get(sid); if (it) it.lastPhoto = now; }
+    this.broadcast('photo', { captureId: randomUUID(), at: now + GAME_CONFIG.photo.countdownMs, sids });
   }
 
   // ───────────────────── 打小人排队 ─────────────────────

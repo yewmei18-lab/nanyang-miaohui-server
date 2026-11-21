@@ -163,3 +163,19 @@ export async function placeMamakOrder(playerId: string, orderId: string, request
 export function setOrderStatus(orderId: string, status: string) {
   return pool.query('UPDATE mamak_orders SET status=$2, updated_at=now() WHERE id=$1', [orderId, status]).catch(() => {});
 }
+
+/** 同时扣金币和精力（套圈开局）：一个事务，任一不够都不扣；同 key 重试不重复扣 */
+export async function spendBoth(playerId: string, coins: number, energy: number, reason: string, sourceId: string, key: string, now = Date.now()): Promise<SpendResult> {
+  return tx(async (c) => {
+    const w = await lockAndRegen(c, playerId, now);
+    const ex = await c.query('SELECT id FROM ledger WHERE idempotency_key=$1', [`${key}:coins`]);
+    if (ex.rowCount) { await writeWallet(c, playerId, w); return { ok: true as const, replay: true, wallet: toView(w, now), ledgerId: Number(ex.rows[0].id) }; }
+    if (w.coins < coins || w.energy < energy) { await writeWallet(c, playerId, w); return { ok: false as const, error: 'insufficient' as const, wallet: toView(w, now) }; }
+    const wasFull = w.energy >= GAME_CONFIG.wallet.maxEnergy;
+    w.coins -= coins; w.energy -= energy; if (wasFull) w.energyUpdatedAtMs = now;
+    const ins = await c.query(`INSERT INTO ledger(player_id, asset, delta, reason, source_id, idempotency_key, config_version) VALUES ($1,'coins',$2,$3,$4,$5,$6) RETURNING id`, [playerId, -coins, reason, sourceId, `${key}:coins`, CONFIG_VERSION]);
+    await c.query(`INSERT INTO ledger(player_id, asset, delta, reason, source_id, idempotency_key, config_version) VALUES ($1,'energy',$2,$3,$4,$5,$6)`, [playerId, -energy, reason, sourceId, `${key}:energy`, CONFIG_VERSION]);
+    await writeWallet(c, playerId, w);
+    return { ok: true as const, replay: false, wallet: toView(w, now), ledgerId: Number(ins.rows[0].id) };
+  });
+}

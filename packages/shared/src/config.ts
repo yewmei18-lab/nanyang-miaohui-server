@@ -3,7 +3,7 @@
  * 客户端与服务器共用同一份；修改数值必须提升 CONFIG_VERSION。
  * 已开局/已下单的记录保存当时的 configVersion，不追溯。
  */
-export const CONFIG_VERSION = 'v2-trial-4';
+export const CONFIG_VERSION = 'v2-trial-5';
 
 export const GAME_CONFIG = {
   version: CONFIG_VERSION,
@@ -71,6 +71,14 @@ export const GAME_CONFIG = {
   },
   /** 求签（06 第 7 节）：免费；每天只能求一次（用户 2026-11-21 定），这一次有 10% 机会天降 50 金币 */
   fortune: { firstDailyLuckChance: 0.1, luckCoins: 50, shakeMs: 2600, cooldownMs: 4000 },
+  /** 天灯（06 第 8 节）：10 金币一盏；愿望可公开或只自己看到 */
+  lantern: { price: 10, wishMaxChars: 40, flightMs: 45_000, maxInSky: 24 },
+  /** 套圈（06 第 10 节）：5 金币 + 3 精力一局，5 个圈，60 秒；奖励按柱子 2/2/5/5/10，同一根每局只领一次 */
+  ring: { coins: 5, energy: 3, rings: 5, sessionMs: 60_000, throwGapMs: 1200 },
+  /** 烧掉烦恼：免费；写的内容不保存、不给别人看 */
+  burn: { maxChars: 60, gapMs: 4000 },
+  /** 打卡拍照：倒数 3 秒 */
+  photo: { countdownMs: 3000, gapMs: 6000 },
   /** 天后宫：上香免费；香油钱（金币） */
   pray: { donateAmounts: [1, 6, 8, 18], incenseMs: 180_000, maxIncense: 9, incenseCooldownMs: 8_000 },
   leaderboard: {

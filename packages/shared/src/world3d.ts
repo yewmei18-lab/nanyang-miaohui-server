@@ -14,7 +14,7 @@ import type { Box, SeatDef } from './world.ts';
 export const WORLD_VERSION = 'street-3d-2';
 export const SPAWN = PICTURE_SPAWN;
 
-export type SeatKind = 'villain' | 'woodfish' | 'bath' | 'mamak' | 'pray' | 'fortune' | 'bazi';
+export type SeatKind = 'villain' | 'woodfish' | 'bath' | 'mamak' | 'pray' | 'fortune' | 'bazi' | 'burn' | 'lantern' | 'ring' | 'photo';
 export interface Seat3D extends SeatDef { kind: SeatKind; zone: number; /** 属于第几张桌（MAMAK） */ table?: number }
 
 /** 木鱼禅院：开放式木殿 */
@@ -45,6 +45,25 @@ export const MAMAK_STOOL_Y = 0.52;
 export const QIUQIAN = { x: 3.6, z: 23.45 };
 /** 命理阁：入口右手边第二间店屋的骑楼下，师傅坐在桌后，客人坐小凳 */
 export const MINGLI = { deskX: 5.85, z: 2.0, masterX: 6.27, stoolX: 5.3, stoolZ: 1.83, facadeX: 6.75 };
+/** 烧掉烦恼：街左前方三个金炉 */
+export const BURN_POTS = [{ x: -4.7, z: 0.6 }, { x: -4.7, z: 3.0 }, { x: -4.7, z: 5.4 }];
+/** 牌坊外的小广场：左边放天灯、中间打卡拍照（背景是牌坊和街）、右边套圈 */
+export const LANTERN_SPOTS = [{ x: -3.6, z: -6.6 }, { x: -4.2, z: -8.6 }, { x: -3.6, z: -10.6 }];
+export const LANTERN_TABLE = { x: -5.4, z: -8.6 };
+/** 拍照：两个站位面向南（镜头在南边往北拍，背景是牌坊） */
+export const PHOTO = { spots: [{ x: -0.45, z: -7.4 }, { x: 0.45, z: -7.4 }], camX: 0, camY: 1.35, camZ: -11.2, standX: 0, standZ: -12.2 };
+/** 套圈：站在投掷线往东（+X）丢，5 根柱子，越远奖励越多 */
+export const RING = {
+  stand: { x: 2.1, z: -8.4 }, origin: { x: 2.35, z: -8.4 }, boothX: 6.6,
+  pegs: [{ x: 3.4, z: -7.6, coins: 2 }, { x: 3.4, z: -9.2, coins: 2 }, { x: 4.3, z: -7.9, coins: 5 }, { x: 4.3, z: -8.9, coins: 5 }, { x: 5.2, z: -8.4, coins: 10 }],
+  pegR: 0.05, ringR: 0.17,
+};
+/** 套圈落点：方向角 a（0 = 正东，正数往北/+Z）、力度 p（0..1）→ 落地点。服务器和客户端用同一个公式（没有随机） */
+export function ringLanding(a: number, p: number) {
+  const aa = Math.max(-0.6, Math.min(0.6, a)), pp = Math.max(0, Math.min(1, p));
+  const d = 0.6 + pp * 4.4;
+  return { x: RING.origin.x + Math.cos(aa) * d, z: RING.origin.z + Math.sin(aa) * d };
+}
 /** 打小人摊的婆婆：摊位北头，坐在蒲团上面向街，自己有一块砖台 */
 export const POPO = { x: -3.3, z: 13.85, yaw: Math.PI / 2, brickX: -2.62 };
 /** 今日小人榜木牌 */
@@ -123,11 +142,20 @@ const bazi: Seat3D[] = [{
   hit: { x: MINGLI.deskX, y: 0.8, z: MINGLI.z },
 }];
 
-export const SEATS: Seat3D[] = [...villain, ...woodfish, ...bath, ...mamak, ...pray, ...fortune, ...bazi];
+const stand = (kind: SeatKind, zone: number, x: number, z: number, yaw: number, ax: number, az: number, hit: { x: number; y: number; z: number }): Seat3D =>
+  ({ id: nextId++, kind, zone, station: { x: hit.x, z: hit.z, w: 0.8, d: 0.8, h: hit.y }, seat: { x, z, yaw }, approach: { x: ax, z: az }, hit });
+const burn: Seat3D[] = BURN_POTS.map((p) => stand('burn', 7, p.x + 0.95, p.z, -Math.PI / 2, p.x + 1.6, p.z, { x: p.x, y: 0.95, z: p.z }));
+const lantern: Seat3D[] = LANTERN_SPOTS.map((p) => stand('lantern', 8, p.x, p.z, -Math.PI / 2 - 0.3, p.x + 0.8, p.z, { x: p.x, y: 1.6, z: p.z }));
+const ring: Seat3D[] = [stand('ring', 9, RING.stand.x, RING.stand.z, Math.PI / 2, RING.stand.x - 0.7, RING.stand.z, { x: 4.3, y: 0.3, z: RING.stand.z })];
+const photo: Seat3D[] = PHOTO.spots.map((p, i) => stand('photo', 10, p.x, p.z, Math.PI, p.x + (i ? 0.5 : -0.5), p.z + 0.8, { x: PHOTO.camX, y: PHOTO.camY, z: PHOTO.camZ }));
+
+export const SEATS: Seat3D[] = [...villain, ...woodfish, ...bath, ...mamak, ...pray, ...fortune, ...bazi, ...burn, ...lantern, ...ring, ...photo];
 
 /** 可以走的地面：整条街（两排店屋之间）+ 庙前广场 + 禅院 + 浴池花园 */
 export const WALK_RECTS = [
   { minX: -6.2, maxX: 6.3, minZ: -2.4, maxZ: 24.6 }, // 主街（店屋到店屋）
+  { minX: -2.9, maxX: 2.9, minZ: -4.6, maxZ: -2.4 }, // 牌坊中间
+  { minX: -6.0, maxX: 6.2, minZ: -12.6, maxZ: -4.6 }, // 牌坊外的小广场
   { minX: 6.3, maxX: 8.8, minZ: 12.0, maxZ: 24.6 }, // 姻缘树后面、月老庙旁
   { minX: -8.6, maxX: 9.0, minZ: 22.4, maxZ: 25.9 }, // 天后宫台阶前的广场（连通东西两区）
   { minX: ZEN_HALL.minX, maxX: ZEN_HALL.altarX - 0.8, minZ: ZEN_HALL.minZ + 0.4, maxZ: ZEN_HALL.maxZ - 0.4 },
@@ -167,6 +195,10 @@ export const COLLIDERS: Box[] = [
   b('banyanTrunk', 'tree', 5.6, 14.5, 1.1, 1.1, 5),
   b('yuelao', 'building', 6.4, 21.4, 1.7, 1.5, 4),
   b('gateL', 'prop', -3.6, -3.5, 0.5, 0.5, 4), b('gateR', 'prop', 3.6, -3.5, 0.5, 0.5, 4),
+  ...BURN_POTS.map((p, i) => b(`burnPot${i}`, 'prop', p.x, p.z, 0.5, 0.5, 1)),
+  b('lanternTable', 'table', LANTERN_TABLE.x, LANTERN_TABLE.z, 0.4, 0.55, 0.8),
+  b('photoCam', 'prop', PHOTO.camX, -11.3, 0.4, 0.4, 1.6),
+  b('ringField', 'prop', 4.35, RING.origin.z, 1.25, 1.15, 0.4), b('ringBooth', 'building', RING.boothX, RING.origin.z, 0.7, 1.4, 2.5),
   // 禅院：矮桌、西侧柱子
   ...woodfish.map((s) => b(`zentable_${s.id}`, 'table', s.station.x, s.station.z, 0.32, 0.48, 0.42)),
   ...[22.9, 26.2, 31.8, 35.1].map((z, i) => b(`zenCol${i}`, 'pillar', ZEN_HALL.minX + 0.3, z, 0.2, 0.2, 4)),
