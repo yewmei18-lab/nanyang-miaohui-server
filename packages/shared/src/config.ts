@@ -3,7 +3,7 @@
  * 客户端与服务器共用同一份；修改数值必须提升 CONFIG_VERSION。
  * 已开局/已下单的记录保存当时的 configVersion，不追溯。
  */
-export const CONFIG_VERSION = 'v2-trial-3';
+export const CONFIG_VERSION = 'v2-trial-4';
 
 export const GAME_CONFIG = {
   version: CONFIG_VERSION,
@@ -30,7 +30,7 @@ export const GAME_CONFIG = {
   },
   villain: {
     countdownMs: 3000,
-    durationMs: 30000,
+    durationMs: 10000, // 用户 2026-11-21：一局 10 秒
     energyCost: 5,
     /** 结束边界网络宽限（07：最多 200ms） */
     endGraceMs: 200,

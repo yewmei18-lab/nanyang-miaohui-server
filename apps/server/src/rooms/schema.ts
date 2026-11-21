@@ -22,6 +22,7 @@ export const SeatS = schema({
   by: t.string().default(''), // 占用者 sessionId
   until: t.float64().default(0),
   food: t.string().default(''), // MAMAK：桌上这个位置前面放着的食物（菜单 id）
+  hold: t.string().default(''), // 打小人排队：这个空位留给谁（sessionId）
 }, 'Seat');
 export type SeatS = SchemaType<typeof SeatS>;
 
@@ -43,5 +44,6 @@ export const PlazaState = schema({
   seats: t.array(SeatS),
   aneh: StaffS,
   incense: t.uint8().default(0), // 香炉里正在烧的香（束）
+  vq: t.uint8().default(0), // 打小人排队人数
 }, 'PlazaState');
 export type PlazaState = SchemaType<typeof PlazaState>;

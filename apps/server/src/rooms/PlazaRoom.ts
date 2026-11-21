@@ -73,6 +73,8 @@ interface Internal {
   /** 正在等数据库确认的下单 requestId（防止同时点两样都扣钱） */
   orderBusy: string | null;
   lastIncense: number;
+  /** 这次坐下已经打过几局（后面有人排队时只能打一局） */
+  vPlayed: number;
 }
 
 export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
@@ -86,6 +88,9 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   private staffQueue: StaffTask[] = [];
   private staff: { task: StaffTask | null; phase: StaffPhase; path: Array<{ x: number; z: number }>; until: number } = { task: null, phase: 'idle', path: [], until: 0 };
   private incense: number[] = [];
+  /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
+  private vQueue: string[] = [];
+  private vHoldUntil = new Map<number, number>();
 
   onCreate() {
     this.setPatchRate(GAME_CONFIG.room.patchMs);
@@ -99,6 +104,8 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       this.broadcast('emote', { sid: client.sessionId, e: m.e });
     });
     const lastChat = new Map<string, number>();
+    this.onMessage('villain.queue', (client) => this.onVillainQueue(client));
+    this.onMessage('villain.unqueue', (client) => this.leaveVillainQueue(client.sessionId));
     this.onMessage('chat', (client, m: { t?: unknown }) => {
       const text = cleanChat(m?.t); if (!text) return;
       const now = Date.now();
@@ -178,7 +185,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const it: Internal = {
       playerId: auth.playerId, inputs: [], credit: 0, seatRequests: new Map(), path: [], pathDeadline: 0,
       stateBeforeDrop: PSTATE.MOVING, session: null, sessionRequests: new Map(), superseded: false,
-      wf: { seen: new Set(), window: [], today: 0, pending: 0, loaded: false }, bath: null, order: null, orderBusy: null, lastIncense: 0, fortunes: new Map(), lastShake: 0,
+      wf: { seen: new Set(), window: [], today: 0, pending: 0, loaded: false }, bath: null, order: null, orderBusy: null, lastIncense: 0, vPlayed: 0, fortunes: new Map(), lastShake: 0,
     };
     if (takeover && takeover.p) {
       const o = takeover.p;
@@ -246,6 +253,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (!it || it.superseded) return;
     const p = this.state.players.get(client.sessionId);
     this.cancelOrder(it, 'left');
+    this.leaveVillainQueue(client.sessionId);
     if (p && p.seat >= 0) this.freeSeat(p.seat);
     it.bath = null;
     void this.flushWoodfish();
@@ -318,6 +326,10 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       if (it.bath) this.tickBath(sid, p, it, now);
     }
     this.tickStaff(now);
+    for (const [seatId, until] of this.vHoldUntil) if (now > until) { // 轮到的人没来：给下一个
+      const seat = this.state.seats[seatId]; this.vHoldUntil.delete(seatId);
+      if (seat && seat.st === SEAT_STATE.FREE) { const who = seat.hold; seat.hold = ''; this.clients.find((c) => c.sessionId === who)?.send('villain.turn', { expired: true }); this.offerVillainSeat(seatId); }
+    }
     if (this.incense.length && this.incense[0] < now) { this.incense = this.incense.filter((t) => t > now); this.state.incense = this.incense.length; }
     // 预约超时释放
     for (const seat of this.state.seats) {
@@ -387,14 +399,23 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (!def || !seat) return reply({ ok: false, seatId, reason: 'no_such_seat' });
     if (p.st !== PSTATE.MOVING || p.seat >= 0) return reply({ ok: false, seatId, reason: 'busy' });
     const dist = Math.hypot(p.x - def.seat.x, p.z - def.seat.z);
-    if (dist > S.interactRadius + 0.5) return reply({ ok: false, seatId, reason: 'too_far' });
+    const heldForMe = def.kind === 'villain' && seat.hold === client.sessionId;
+    if (dist > S.interactRadius + 0.5 && !(heldForMe && dist < 9)) return reply({ ok: false, seatId, reason: 'too_far' });
     // 服务器单线程原子分配：只有 FREE 才能被预约
     if (seat.st !== SEAT_STATE.FREE) return reply({ ok: false, seatId, reason: 'taken' });
-    seat.st = SEAT_STATE.RESERVED; seat.by = client.sessionId; seat.until = Date.now() + S.reserveMs;
+    // 打小人有人排队：空位只留给轮到的人；没轮到的人要先排队
+    if (def.kind === 'villain') {
+      if (seat.hold && seat.hold !== client.sessionId) return reply({ ok: false, seatId, reason: 'queue' });
+      if (!seat.hold && this.vQueue.length && this.vQueue[0] !== client.sessionId) return reply({ ok: false, seatId, reason: 'queue' });
+    }
+    seat.st = SEAT_STATE.RESERVED; seat.by = client.sessionId; seat.until = Date.now() + (heldForMe ? 9000 : S.reserveMs);
+    if (heldForMe) { seat.hold = ''; this.vHoldUntil.delete(seatId); }
+    if (def.kind === 'villain') { this.leaveVillainQueue(client.sessionId); it.vPlayed = 0; }
     p.seat = seatId; p.st = PSTATE.APPROACHING; p.actAt = Date.now();
     it.inputs.length = 0;
     // 路径：先走到座位正前方的站立点（位于街道一侧），再进蒲团；不穿台
     const path: Array<{ x: number; z: number }> = [];
+    if (heldForMe && Math.hypot(p.x - def.approach.x, p.z - def.approach.z) > 2.5) path.push({ x: -0.6, z: def.approach.z }); // 从街中间走过来，不穿砖台
     if (Math.hypot(p.x - def.approach.x, p.z - def.approach.z) > 0.25) path.push({ x: def.approach.x, z: def.approach.z });
     path.push({ x: def.seat.x, z: def.seat.z });
     it.path = path;
@@ -422,7 +443,8 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   private freeSeat(seatId: number) {
     const seat = this.state.seats[seatId];
     if (!seat) return;
-    seat.st = SEAT_STATE.FREE; seat.by = ''; seat.until = 0; seat.food = '';
+    seat.st = SEAT_STATE.FREE; seat.by = ''; seat.until = 0; seat.food = ''; seat.hold = '';
+    if (SEATS[seatId]?.kind === 'villain') this.offerVillainSeat(seatId);
     this.staffQueue = this.staffQueue.filter((t) => !(t.kind === 'visit' && t.seatId === seatId));
     if (this.staff.task?.kind === 'visit' && this.staff.task.seatId === seatId) this.staffDone();
   }
@@ -449,6 +471,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (existingId) { if (it.session?.id === existingId) this.sendSessionState(client, it.session); return; }
     if (p.st !== PSTATE.SEATED_IDLE || p.seat < 0 || SEATS[p.seat]?.kind !== 'villain') return err('not_seated');
     if (it.session && (it.session.phase === 'countdown' || it.session.phase === 'active' || it.session.phase === 'ending')) return err('already_running');
+    if (it.vPlayed >= 1 && this.vQueue.length) return err('queue_waiting'); // 后面有人排队：打完一局先让位
     const name = normalizeTargetName(m?.targetDisplayName);
     if (!name.ok) return err(`name_${name.error}`);
     it.sessionRequests.set(requestId, 'pending');
@@ -479,7 +502,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     }
     it.sessionRequests.set(requestId, s.id);
     if (Date.now() - tStart > 500) console.warn('[session.start] slow', Date.now() - tStart, 'ms');
-    it.session = s;
+    it.session = s; it.vPlayed++;
     this.sendSessionState(client, s);
     // 提前完成扣精力与开局，确保倒数结束那一刻的点击不会因开局确认未到而丢失（ct < startsAt 的仍按 before_start 拒收）
     s.timers.push(setTimeout(() => { void this.activateSession(client.sessionId, s); }, Math.max(0, s.startsAt - Date.now() - 250)));
@@ -692,6 +715,37 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
         client.send('bath.reward', { energy, coins, coinsToday, coinCap: BATH.dailyCoinCap });
       }
     } catch (e) { console.warn('[bath] reward failed', (e as Error).message); }
+  }
+
+  // ───────────────────── 打小人排队 ─────────────────────
+
+  private villainQueuePush() {
+    this.state.vq = this.vQueue.length;
+    this.vQueue.forEach((sid, i) => this.clients.find((c) => c.sessionId === sid)?.send('villain.queue', { pos: i + 1, total: this.vQueue.length }));
+  }
+  private onVillainQueue(client: Client) {
+    const p = this.state.players.get(client.sessionId); if (!p || p.st !== PSTATE.MOVING || p.seat >= 0) return;
+    if (this.vQueue.includes(client.sessionId)) return this.villainQueuePush();
+    this.vQueue.push(client.sessionId);
+    // 有空位又没留给别人：马上轮到
+    for (const s of SEATS) if (s.kind === 'villain' && this.state.seats[s.id].st === SEAT_STATE.FREE && !this.state.seats[s.id].hold) { this.offerVillainSeat(s.id); break; }
+    this.villainQueuePush();
+  }
+  private leaveVillainQueue(sid: string) {
+    const i = this.vQueue.indexOf(sid); if (i < 0) return;
+    this.vQueue.splice(i, 1); this.villainQueuePush();
+  }
+  /** 空出来的砖台：留给排第一的人 20 秒 */
+  private offerVillainSeat(seatId: number) {
+    const seat = this.state.seats[seatId]; if (!seat || seat.st !== SEAT_STATE.FREE || seat.hold) return;
+    while (this.vQueue.length) {
+      const sid = this.vQueue.shift()!; const p = this.state.players.get(sid);
+      if (!p || p.st !== PSTATE.MOVING || p.seat >= 0) continue;
+      seat.hold = sid; this.vHoldUntil.set(seatId, Date.now() + 20_000);
+      this.clients.find((c) => c.sessionId === sid)?.send('villain.turn', { seatId, holdMs: 20_000 });
+      break;
+    }
+    this.villainQueuePush();
   }
 
   // ───────────────────── MAMAK：Aneh 送餐 ─────────────────────
