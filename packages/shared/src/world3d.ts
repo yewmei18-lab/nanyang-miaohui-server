@@ -183,8 +183,8 @@ export const WALK_RECTS = [
   { minX: -6.2, maxX: 6.3, minZ: -2.4, maxZ: 24.6 }, // 主街（店屋到店屋）
   { minX: -2.9, maxX: 2.9, minZ: -4.6, maxZ: -2.4 }, // 牌坊中间
   { minX: -6.0, maxX: 6.2, minZ: -12.6, maxZ: -4.6 }, // 牌坊外的小广场
-  { minX: 5.6, maxX: 13.2, minZ: -6.6, maxZ: -1.8 }, // 灯笼巷（从主街往东，和主街接上）
-  { minX: -13.2, maxX: -5.6, minZ: -6.6, maxZ: -1.8 }, // 童玩巷（从主街往西）
+  { minX: 5.6, maxX: 13.2, minZ: -6.6, maxZ: -1.3 }, // 灯笼巷（从主街往东，和主街接上）
+  { minX: -13.2, maxX: -5.6, minZ: -6.6, maxZ: -1.3 }, // 童玩巷（从主街往西）
   { minX: -17.6, maxX: -13.0, minZ: -6.6, maxZ: 23.4 }, // Mamak 夜市街（一路通到洗衰运）
   { minX: 8.6, maxX: 10.8, minZ: 15.0, maxZ: 20.6 }, // 戏台后台
   { minX: 13.0, maxX: 18.6, minZ: -12.0, maxZ: 6.0 }, // 河边（近岸）
