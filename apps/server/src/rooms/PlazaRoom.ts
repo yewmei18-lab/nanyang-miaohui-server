@@ -8,7 +8,7 @@ import {
 } from '@nanyang/shared';
 import { PlazaState, PlayerS, SeatS, OrangeS } from './schema.ts';
 import { verifyToken } from '../auth.ts';
-import { pool } from '../db.ts';
+import { pool, tx } from '../db.ts';
 import { getWallet, spend, spendBoth, credit, refund, placeMamakOrder, setOrderStatus } from '../wallet.ts';
 import { hitPipeline, leaderboard, upsertTarget, sealSession, getSessionResult } from '../hits.ts';
 import { metrics } from '../metrics.ts';
@@ -114,7 +114,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     });
     const lastChat = new Map<string, number>();
     this.onMessage('villain.queue', (client) => this.onVillainQueue(client));
-    this.onMessage('orange.give', (client, m: { to?: unknown }) => this.onOrangeGive(client, m));
+    this.onMessage('orange.give', (client, m: { to?: unknown }) => { void this.onOrangeGive(client, m); });
     // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
     this.onMessage('debug.lion', (_c, m: { at?: unknown }) => {
       if (process.env.ALLOW_DEBUG !== '1' || typeof m?.at !== 'number') return;
@@ -171,6 +171,11 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     });
     this.onMessage('pray.donate', (client, m: { amount?: unknown; requestId?: unknown }) => { void this.onDonate(client, m); });
     this.wfTimer = setInterval(() => { void this.flushWoodfish(); }, 3000);
+    this.onMessage('freetry.get', async (client) => {
+      const it = this.internal.get(client.sessionId); if (!it) return;
+      const r = await pool.query(`SELECT item FROM player_items WHERE player_id=$1 AND item LIKE 'freetry:%'`, [it.playerId]).catch(() => null);
+      client.send('freetry', { used: (r?.rows ?? []).map((x: { item: string }) => x.item.slice(8)) });
+    });
     this.onMessage('wallet.get', async (client) => {
       const it = this.internal.get(client.sessionId); if (!it) return;
       try { client.send(MSG.S_WALLET, await getWallet(it.playerId)); } catch { /* */ }
@@ -503,7 +508,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const tStart = Date.now();
     let wallet;
     try { wallet = await getWallet(it.playerId); } catch { it.sessionRequests.delete(requestId); return err('db_unavailable'); }
-    if (wallet.energy < V.energyCost) { it.sessionRequests.delete(requestId); return err('no_energy', { wallet }); }
+    if (wallet.energy < V.energyCost && await this.hadFreeTry(it.playerId, 'villain')) { it.sessionRequests.delete(requestId); return err('no_energy', { wallet }); }
     // 期间状态可能变化
     if (p.st !== PSTATE.SEATED_IDLE || !this.internal.has(client.sessionId)) { it.sessionRequests.delete(requestId); return err('not_seated'); }
 
@@ -537,8 +542,12 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const it = this.internal.get(sid) ?? [...this.internal.values()].find((x) => x.session === s);
     if (!it || it.session !== s || s.phase !== 'countdown') return;
     // 倒数结束正式开局：扣 5 精力一次（唯一 key）
-    let r;
-    try { r = await spend(it.playerId, 'energy', V.energyCost, 'villain_session', s.id, `villain:${s.id}:energy`); }
+    let r: { ok: boolean; wallet?: unknown };
+    try {
+      // 第一次玩免费（每个账号一次）：不扣精力
+      if (await this.claimFreeTry(it.playerId, 'villain')) r = { ok: true, wallet: await getWallet(it.playerId) };
+      else r = await spend(it.playerId, 'energy', V.energyCost, 'villain_session', s.id, `villain:${s.id}:energy`);
+    }
     catch { this.cancelSession(it, s, 'db_unavailable'); return; }
     if (!r.ok) { this.cancelSession(it, s, 'no_energy'); return; }
     if (s.phase !== 'countdown') return;
@@ -778,18 +787,40 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       }
     }
   }
+  /** 第一次玩免费：每个账号每种玩法一次（原子领取，连点也只算一次） */
+  private async claimFreeTry(playerId: string, game: string): Promise<boolean> {
+    const r = await pool.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,$2,1) ON CONFLICT DO NOTHING RETURNING qty`, [playerId, `freetry:${game}`]);
+    return !!r.rowCount;
+  }
+  private async hadFreeTry(playerId: string, game: string): Promise<boolean> {
+    const r = await pool.query(`SELECT 1 FROM player_items WHERE player_id=$1 AND item=$2`, [playerId, `freetry:${game}`]);
+    return !!r.rowCount;
+  }
   private addItem(playerId: string, item: string, d: number) {
     return pool.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,$2,GREATEST(0,$3)) ON CONFLICT (player_id, item) DO UPDATE SET qty=GREATEST(0, player_items.qty+$3), updated_at=now()`, [playerId, item, d]).catch(() => {});
   }
-  /** 把一颗旺桔递给旁边的朋友 */
-  private onOrangeGive(client: Client, m: { to?: unknown }) {
+  /** 把一颗旺桔递给旁边的朋友：数据库里一个事务完成（扣一颗、加一颗，要么都成功要么都不变） */
+  private giving = new Set<string>();
+  private async onOrangeGive(client: Client, m: { to?: unknown }) {
     const p = this.state.players.get(client.sessionId); const it = this.internal.get(client.sessionId);
     const to = typeof m?.to === 'string' ? m.to : ''; const q = this.state.players.get(to); const jt = this.internal.get(to);
-    if (!p || !it || !q || !jt || to === client.sessionId || p.orng < 1) return;
+    if (!p || !it || !q || !jt || to === client.sessionId || p.orng < 1 || it.playerId === jt.playerId) return;
     if (Math.hypot(p.x - q.x, p.z - q.z) > 3) return client.send(MSG.S_NOTICE, { kind: 'far', text: '再走近一点才能递给他' });
-    p.orng--; q.orng = Math.min(255, q.orng + 1);
-    void this.addItem(it.playerId, 'orange', -1); void this.addItem(jt.playerId, 'orange', 1);
-    this.broadcast('act', { sid: client.sessionId, a: 'give', to, from: p.name, toName: q.name });
+    if (this.giving.has(it.playerId)) return; // 连点：上一颗还没处理完
+    this.giving.add(it.playerId);
+    try {
+      const ok = await tx(async (c) => {
+        const d = await c.query(`UPDATE player_items SET qty=qty-1, updated_at=now() WHERE player_id=$1 AND item='orange' AND qty>=1 RETURNING qty`, [it.playerId]);
+        if (!d.rowCount) return false;
+        await c.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,'orange',1) ON CONFLICT (player_id, item) DO UPDATE SET qty=player_items.qty+1, updated_at=now()`, [jt.playerId]);
+        return true;
+      });
+      if (!ok) { p.orng = 0; return; }
+      const pp = this.state.players.get(client.sessionId), qq = this.state.players.get(to);
+      if (pp) pp.orng = Math.max(0, pp.orng - 1); if (qq) qq.orng = Math.min(255, qq.orng + 1);
+      this.broadcast('act', { sid: client.sessionId, a: 'give', to, from: p.name, toName: q.name });
+    } catch { client.send(MSG.S_NOTICE, { kind: 'err', text: '没递成功，桔子还在你手上' }); }
+    finally { this.giving.delete(it.playerId); }
   }
 
   // ───────────────────── 烧掉烦恼、天灯、套圈、拍照 ─────────────────────
@@ -841,12 +872,16 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (a.it.ring && Date.now() < a.it.ring.endsAt && a.it.ring.left > 0) return client.send('ring.state', { requestId, ok: false, reason: 'running' });
     const id = randomUUID();
     let r;
-    try { r = await spendBoth(a.it.playerId, RG.coins, RG.energy, 'ring_toss', id, `ring:${a.it.playerId}:${requestId}`); } catch { return client.send('ring.state', { requestId, ok: false, reason: 'db_unavailable' }); }
+    let free = false;
+    try {
+      free = await this.claimFreeTry(a.it.playerId, 'ring');
+      r = free ? { ok: true as const, replay: false, wallet: await getWallet(a.it.playerId), ledgerId: 0 } : await spendBoth(a.it.playerId, RG.coins, RG.energy, 'ring_toss', id, `ring:${a.it.playerId}:${requestId}`);
+    } catch { return client.send('ring.state', { requestId, ok: false, reason: 'db_unavailable' }); }
     if (!r.ok) return client.send('ring.state', { requestId, ok: false, reason: 'insufficient', wallet: r.wallet });
     client.send(MSG.S_WALLET, r.wallet);
     if (r.replay) return;
     a.it.ring = { id, left: RG.rings, claimed: new Set(), endsAt: Date.now() + RG.sessionMs, lastThrow: 0, won: 0, seen: new Set() };
-    client.send('ring.state', { requestId, ok: true, sessionId: id, left: RG.rings, endsAt: a.it.ring.endsAt, won: 0, claimed: [] });
+    client.send('ring.state', { requestId, ok: true, sessionId: id, left: RG.rings, endsAt: a.it.ring.endsAt, won: 0, claimed: [], free });
   }
 
   /** 套圈判定：服务器用同一个公式算落点（没有随机），落点离柱子够近就算套中 */

@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { pool } from './db.ts';
 import { ensureWallet } from './wallet.ts';
+import { verifySession } from './account.ts';
 
 /**
  * 游客身份：服务器签发 playerId + 随机密钥；数据库只存密钥哈希。
@@ -19,6 +20,11 @@ export async function createGuest(): Promise<{ playerId: string; token: string }
 
 export async function verifyToken(token: unknown): Promise<{ playerId: string; nickname: string | null } | null> {
   if (typeof token !== 'string' || token.length > 200) return null;
+  if (token.startsWith('s.')) { // 正式账号登录的会话
+    const pid = await verifySession(token); if (!pid) return null;
+    const r = await pool.query('SELECT nickname FROM players WHERE id=$1', [pid]);
+    return r.rowCount ? { playerId: pid, nickname: r.rows[0].nickname } : null;
+  }
   const [playerId, secret] = token.split('.');
   if (!playerId || !secret || !UUID_RE.test(playerId)) return null;
   const r = await pool.query('SELECT guest_credential_hash, nickname FROM players WHERE id=$1', [playerId]);

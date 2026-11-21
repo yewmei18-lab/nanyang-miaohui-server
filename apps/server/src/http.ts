@@ -1,6 +1,7 @@
 import express from 'express';
 import { validateAvatar, normalizeNickname, GAME_CONFIG, CONFIG_VERSION, WORLD_VERSION, klDay, rosterAvatar } from '@nanyang/shared';
 import { createGuest, verifyToken, bearer } from './auth.ts';
+import { register, login, resetWithCode, summary } from './account.ts';
 import { pool } from './db.ts';
 import { getWallet } from './wallet.ts';
 import { queryTop, getSessionResult, hitPipeline, leaderboard } from './hits.ts';
@@ -39,6 +40,29 @@ export function mountHttp(app: express.Application) {
     try { res.json(await createGuest()); } catch (e) { res.status(503).json({ error: 'db_unavailable' }); }
   });
 
+  // ── 正式账号 ──
+  const ipOf = (req: express.Request) => String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+  app.post('/api/account/register', async (req, res) => {
+    const who = await auth(req, res); if (!who) return;
+    try { const r = await register(who.playerId, String(req.body?.username ?? ''), String(req.body?.password ?? '')); res.status(r.ok ? 200 : 400).json(r); }
+    catch { res.status(503).json({ ok: false, error: 'db_unavailable' }); }
+  });
+  app.post('/api/account/login', async (req, res) => {
+    try { const r = await login(String(req.body?.username ?? ''), String(req.body?.password ?? ''), ipOf(req));
+      if (!r.ok) { res.status(r.error === 'locked' ? 429 : 401).json(r); return; }
+      res.json({ ok: true, token: r.token, account: await summary(r.playerId) });
+    } catch { res.status(503).json({ ok: false, error: 'db_unavailable' }); }
+  });
+  app.post('/api/account/reset', async (req, res) => {
+    try { const r = await resetWithCode(String(req.body?.username ?? ''), String(req.body?.code ?? ''), String(req.body?.password ?? ''), ipOf(req));
+      res.status(r.ok ? 200 : r.error === 'locked' ? 429 : 400).json(r);
+    } catch { res.status(503).json({ ok: false, error: 'db_unavailable' }); }
+  });
+  app.get('/api/account/summary', async (req, res) => {
+    const who = await auth(req, res); if (!who) return;
+    res.json(await summary(who.playerId));
+  });
+
   app.get('/api/me', async (req, res) => {
     const who = await auth(req, res); if (!who) return;
     const a = await pool.query('SELECT config_json, version FROM avatars WHERE player_id=$1', [who.playerId]);
@@ -49,7 +73,8 @@ export function mountHttp(app: express.Application) {
       const n = await pool.query('SELECT count(*)::int AS n FROM players WHERE created_at < (SELECT created_at FROM players WHERE id=$1)', [who.playerId]);
       suggested = rosterAvatar(n.rows[0].n);
     }
-    res.json({ nickname: who.nickname, avatar: a.rows[0]?.config_json ?? null, avatarVersion: a.rows[0]?.version ?? 0, wallet, suggested });
+    const acc = await pool.query('SELECT username FROM players WHERE id=$1', [who.playerId]);
+    res.json({ username: acc.rows[0]?.username ?? null, nickname: who.nickname, avatar: a.rows[0]?.config_json ?? null, avatarVersion: a.rows[0]?.version ?? 0, wallet, suggested });
   });
 
   // 保存外观：只接受清单枚举；version 用于乐观并发
