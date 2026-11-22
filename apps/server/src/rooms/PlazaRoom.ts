@@ -15,7 +15,10 @@ import { hitPipeline, leaderboard, upsertTarget, sealSession, getSessionResult }
 import { metrics } from '../metrics.ts';
 import { StreetEvents } from '../streetEvents.ts';
 import { Batch5 } from './batch5.ts';
+import { Minigames } from './minigames.ts';
+import { Casino } from './casino.ts';
 
+type QKind = 'villain' | 'burn';
 const V = GAME_CONFIG.villain;
 const WF = GAME_CONFIG.woodfish;
 const BATH = GAME_CONFIG.bath;
@@ -85,6 +88,8 @@ interface Internal {
   done: Map<string, unknown>; lastBurn: number; lastPhoto: number;
   /** 套圈这一局 */
   ring: { id: string; left: number; claimed: Set<number>; endsAt: number; lastThrow: number; won: number; seen: Set<number> } | null;
+  /** 正在试戴（还没买）的面具 */
+  maskTry?: boolean;
 }
 
 export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
@@ -105,15 +110,18 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     broadcast: (t, m) => this.broadcast(t, m),
     stamp: (sid, st) => { void this.stamp(sid, st); },
   });
+  minigames = new Minigames({ state: this.state as never, clients: this.clients as never, playerIdOf: (sid) => this.internal.get(sid)?.playerId });
   b5 = new Batch5({
     state: this.state as never, clients: this.clients as never,
     playerIdOf: (sid) => this.internal.get(sid)?.playerId,
     broadcast: (t, m) => this.broadcast(t, m),
     addItem: (pid, item, d) => this.addItem(pid, item, d),
   });
+  casino = new Casino({ state: this.state as never, playerIdOf: (sid) => this.internal.get(sid)?.playerId });
   private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
-  private vQueue: string[] = [];
+  /** 排队：打小人、烧烦恼（位置少，大家轮流） */
+  private queues: Record<QKind, string[]> = { villain: [], burn: [] };
   private vHoldUntil = new Map<number, number>();
 
   onCreate() {
@@ -128,7 +136,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       this.broadcast('emote', { sid: client.sessionId, e: m.e });
     });
     const lastChat = new Map<string, number>();
-    this.onMessage('villain.queue', (client) => this.onVillainQueue(client));
+    this.onMessage('villain.queue', (client, m: { kind?: unknown }) => this.onVillainQueue(client, m?.kind === 'burn' ? 'burn' : 'villain'));
     this.onMessage('guess.answer', (client, m: { v?: unknown }) => client.send('guess.ack', { ok: this.street.answerGuess(client.sessionId, m?.v), v: m?.v }));
     this.onMessage('puppet.vote', (client, m: { c?: unknown }) => client.send('puppet.ack', { ok: this.street.votePuppet(client.sessionId, m?.c), c: m?.c }));
     this.onMessage('lamp.borrow', (client) => { this.street.borrowLamp(client.sessionId); });
@@ -162,7 +170,14 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.onMessage('mask.try', (client, m: { id?: unknown }) => {
       const p = this.state.players.get(client.sessionId); if (!p || !near(client.sessionId, 'mask')) return;
       p.mask = MASKS.some((x) => x.id === m?.id) ? String(m.id) : '';
+      const it = this.internal.get(client.sessionId); if (it) it.maskTry = !!p.mask;
     });
+    // 试戴的面具：走开面具档就脱下（买了的才能到处戴）
+    this.clock.setInterval(() => {
+      const sp = SPOTS.find((x) => x.kind === 'mask')!;
+      for (const [sid, it] of this.internal) { if (!it.maskTry) continue; const p = this.state.players.get(sid); if (!p) continue;
+        if (Math.hypot(p.x - sp.x, p.z - sp.z) > sp.r + 2.5) { it.maskTry = false; void pool.query('SELECT 1 FROM player_items WHERE player_id=$1 AND item=$2', [it.playerId, `mask:${p.mask}`]).then((r) => { if (!r.rowCount && !it.maskTry) { const q = this.state.players.get(sid); if (q) q.mask = ''; } }).catch(() => {}); } }
+    }, 1000);
     this.onMessage('mask.buy', async (client, m: { id?: unknown }) => {
       const it = this.internal.get(client.sessionId); const mk = MASKS.find((x) => x.id === m?.id);
       if (!it || !mk || !near(client.sessionId, 'mask')) return;
@@ -180,7 +195,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       const it = this.internal.get(client.sessionId); const p = this.state.players.get(client.sessionId); if (!it || !p) return;
       if (!m?.id) { p.mask = ''; return; }
       const owned = await pool.query('SELECT 1 FROM player_items WHERE player_id=$1 AND item=$2', [it.playerId, `mask:${String(m.id)}`]);
-      if (owned.rowCount) p.mask = String(m.id);
+      if (owned.rowCount) { p.mask = String(m.id); it.maskTry = false; }
     });
     this.onMessage('items.get', async (client) => {
       const it = this.internal.get(client.sessionId); if (!it) return;
@@ -216,6 +231,8 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       if (k === 'drum') void this.stamp(client.sessionId, 'bridge');
     });
     this.b5.register((type, fn) => this.onMessage(type, fn));
+    this.minigames.register((type, fn) => this.onMessage(type, fn));
+    this.casino.register((type, fn) => this.onMessage(type, fn));
     this.onMessage('orange.give', (client, m: { to?: unknown }) => { void this.onOrangeGive(client, m); });
     // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
     this.onMessage('debug.lion', (_c, m: { at?: unknown }) => {
@@ -227,7 +244,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.onMessage('ring.start', (client, m: { requestId?: unknown }) => { void this.onRingStart(client, m); });
     this.onMessage('ring.throw', (client, m: { seq?: unknown; a?: unknown; p?: unknown }) => { void this.onRingThrow(client, m); });
     this.onMessage('photo.shoot', (client) => this.onPhoto(client));
-    this.onMessage('villain.unqueue', (client) => this.leaveVillainQueue(client.sessionId));
+    this.onMessage('villain.unqueue', (client) => { this.leaveVillainQueue(client.sessionId); });
     this.onMessage('chat', (client, m: { t?: unknown }) => {
       const text = cleanChat(m?.t); if (!text) return;
       const now = Date.now();
@@ -535,18 +552,20 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (!def || !seat) return reply({ ok: false, seatId, reason: 'no_such_seat' });
     if (p.st !== PSTATE.MOVING || p.seat >= 0) return reply({ ok: false, seatId, reason: 'busy' });
     const dist = Math.hypot(p.x - def.seat.x, p.z - def.seat.z);
-    const heldForMe = def.kind === 'villain' && seat.hold === client.sessionId;
+    const queued = def.kind === 'villain' || def.kind === 'burn';
+    const heldForMe = queued && seat.hold === client.sessionId;
     if (dist > S.interactRadius + 0.5 && !(heldForMe && dist < 9)) return reply({ ok: false, seatId, reason: 'too_far' });
     // 服务器单线程原子分配：只有 FREE 才能被预约
     if (seat.st !== SEAT_STATE.FREE) return reply({ ok: false, seatId, reason: 'taken' });
     // 打小人有人排队：空位只留给轮到的人；没轮到的人要先排队
-    if (def.kind === 'villain') {
+    if (queued) {
+      const q = this.queues[def.kind as QKind];
       if (seat.hold && seat.hold !== client.sessionId) return reply({ ok: false, seatId, reason: 'queue' });
-      if (!seat.hold && this.vQueue.length && this.vQueue[0] !== client.sessionId) return reply({ ok: false, seatId, reason: 'queue' });
+      if (!seat.hold && q.length && q[0] !== client.sessionId) return reply({ ok: false, seatId, reason: 'queue' });
     }
     seat.st = SEAT_STATE.RESERVED; seat.by = client.sessionId; seat.until = Date.now() + (heldForMe ? 9000 : S.reserveMs);
     if (heldForMe) { seat.hold = ''; this.vHoldUntil.delete(seatId); }
-    if (def.kind === 'villain') { this.leaveVillainQueue(client.sessionId); it.vPlayed = 0; }
+    if (queued) { this.leaveVillainQueue(client.sessionId); it.vPlayed = 0; }
     p.seat = seatId; p.st = PSTATE.APPROACHING; p.actAt = Date.now();
     it.inputs.length = 0;
     // 路径：先走到座位正前方的站立点（位于街道一侧），再进蒲团；不穿台
@@ -580,7 +599,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const seat = this.state.seats[seatId];
     if (!seat) return;
     seat.st = SEAT_STATE.FREE; seat.by = ''; seat.until = 0; seat.food = ''; seat.hold = '';
-    if (SEATS[seatId]?.kind === 'villain') this.offerVillainSeat(seatId);
+    if (SEATS[seatId]?.kind === 'villain' || SEATS[seatId]?.kind === 'burn') this.offerVillainSeat(seatId);
     this.staffQueue = this.staffQueue.filter((t) => !(t.kind === 'visit' && t.seatId === seatId));
     if (this.staff.task?.kind === 'visit' && this.staff.task.seatId === seatId) this.staffDone();
   }
@@ -607,7 +626,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (existingId) { if (it.session?.id === existingId) this.sendSessionState(client, it.session); return; }
     if (p.st !== PSTATE.SEATED_IDLE || p.seat < 0 || SEATS[p.seat]?.kind !== 'villain') return err('not_seated');
     if (it.session && (it.session.phase === 'countdown' || it.session.phase === 'active' || it.session.phase === 'ending')) return err('already_running');
-    if (it.vPlayed >= 1 && this.vQueue.length) return err('queue_waiting'); // 后面有人排队：打完一局先让位
+    if (it.vPlayed >= 1 && this.queues.villain.length) return err('queue_waiting'); // 后面有人排队：打完一局先让位
     const name = normalizeTargetName(m?.targetDisplayName);
     if (!name.ok) return err(`name_${name.error}`);
     it.sessionRequests.set(requestId, 'pending');
@@ -950,6 +969,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (!t) return;
     const now = Date.now(); if (now - a.it.lastBurn < GAME_CONFIG.burn.gapMs) return; a.it.lastBurn = now;
     this.broadcast('act', { sid: client.sessionId, a: 'burn', seat: a.p.seat });
+    if (this.queues.burn.length) { client.send(MSG.S_NOTICE, { kind: 'queue', text: '后面有人在排队，烧完这张就让位' }); setTimeout(() => { const p = this.state.players.get(client.sessionId); if (p && p.seat >= 0 && SEATS[p.seat]?.kind === 'burn') this.onSeatLeave(client); }, 3500); }
   }
 
   private async onLantern(client: Client, m: { requestId?: unknown; text?: unknown; pub?: unknown }) {
@@ -1034,26 +1054,29 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   // ───────────────────── 打小人排队 ─────────────────────
 
   private villainQueuePush() {
-    this.state.vq = this.vQueue.length;
-    this.vQueue.forEach((sid, i) => this.clients.find((c) => c.sessionId === sid)?.send('villain.queue', { pos: i + 1, total: this.vQueue.length }));
+    this.state.vq = this.queues.villain.length; this.state.bq = this.queues.burn.length;
+    for (const kind of ['villain', 'burn'] as const) { const q = this.queues[kind]; q.forEach((sid, i) => this.clients.find((c) => c.sessionId === sid)?.send('villain.queue', { pos: i + 1, total: q.length, kind })); }
   }
-  private onVillainQueue(client: Client) {
+  private onVillainQueue(client: Client, kind: QKind = 'villain') {
     const p = this.state.players.get(client.sessionId); if (!p || p.st !== PSTATE.MOVING || p.seat >= 0) return;
-    if (this.vQueue.includes(client.sessionId)) return this.villainQueuePush();
-    this.vQueue.push(client.sessionId);
+    const q = this.queues[kind];
+    if (q.includes(client.sessionId)) return this.villainQueuePush();
+    this.leaveVillainQueue(client.sessionId); q.push(client.sessionId);
     // 有空位又没留给别人：马上轮到
-    for (const s of SEATS) if (s.kind === 'villain' && this.state.seats[s.id].st === SEAT_STATE.FREE && !this.state.seats[s.id].hold) { this.offerVillainSeat(s.id); break; }
+    for (const s of SEATS) if (s.kind === kind && this.state.seats[s.id].st === SEAT_STATE.FREE && !this.state.seats[s.id].hold) { this.offerVillainSeat(s.id); break; }
     this.villainQueuePush();
   }
   private leaveVillainQueue(sid: string) {
-    const i = this.vQueue.indexOf(sid); if (i < 0) return;
-    this.vQueue.splice(i, 1); this.villainQueuePush();
+    let changed = false;
+    for (const q of Object.values(this.queues)) { const i = q.indexOf(sid); if (i >= 0) { q.splice(i, 1); changed = true; } }
+    if (changed) this.villainQueuePush();
   }
   /** 空出来的砖台：留给排第一的人 20 秒 */
   private offerVillainSeat(seatId: number) {
     const seat = this.state.seats[seatId]; if (!seat || seat.st !== SEAT_STATE.FREE || seat.hold) return;
-    while (this.vQueue.length) {
-      const sid = this.vQueue.shift()!; const p = this.state.players.get(sid);
+    const q = this.queues[SEATS[seatId].kind as QKind]; if (!q) return;
+    while (q.length) {
+      const sid = q.shift()!; const p = this.state.players.get(sid);
       if (!p || p.st !== PSTATE.MOVING || p.seat >= 0) continue;
       seat.hold = sid; this.vHoldUntil.set(seatId, Date.now() + 20_000);
       this.clients.find((c) => c.sessionId === sid)?.send('villain.turn', { seatId, holdMs: 20_000 });

@@ -36,8 +36,8 @@ export const WALK_POLY = POLY_PX.map(([u, v]) => pictureToGround(u, v));
 
 /** 三座砖台（原图里只有三座）：蒲团像素位置、砖台像素位置 */
 const SEAT_PX: Array<{ cushion: [number, number]; station: [number, number] }> = [
+  // 2026-11-22：只留两个位，其他人排队（一局 10 秒）
   { cushion: [176, 1222], station: [100, 1160] },
-  { cushion: [254, 1106], station: [190, 1070] },
   { cushion: [304, 1036], station: [250, 1010] },
 ];
 export const SEATS: SeatDef[] = SEAT_PX.map((s, id) => {

@@ -62,7 +62,7 @@ export type EventId = 'lion' | 'guess' | 'puppet' | 'lantern';
 export const EVENTS: Array<{ id: EventId; startMin: number; durS: number; name: string; place: string; x: number; z: number }> = [
   { id: 'lion', startMin: 0, durS: 300, name: '舞狮采青', place: '牌坊 → 天后宫', x: 0, z: -2 },
   { id: 'guess', startMin: 15, durS: 180, name: 'Mamak 开估', place: 'Mamak 前', x: -1.3, z: 23.2 },
-  { id: 'puppet', startMin: 30, durS: 300, name: '庙口布袋戏', place: '姻缘树后的戏台', x: 6.9, z: 17.6 },
+  { id: 'puppet', startMin: 30, durS: 300, name: '布袋戏', place: '东边空地的戏台', x: 12.5, z: 15.0 },
   { id: 'lantern', startMin: 45, durS: 240, name: '百灯过桥', place: '灯笼巷 → 石桥', x: 9.5, z: -4.5 },
 ];
 /** 现在正在进行的活动（第几秒）；没有就 null */
@@ -95,7 +95,7 @@ export const TRAY_NAMES: Record<string, string> = { tehtarik: 'Teh Tarik', milo:
 export function guessKindForHour(hour: number): GuessKind { return (['count', 'tray', 'cups'] as const)[((hour % 3) + 3) % 3]; }
 
 // ───────── :30 庙口布袋戏 ─────────
-export const PUPPET = { stage: { x: 8.35, z: 17.6 }, openS: 12, voteS: 125, voteEndS: 150, endS: 285 };
+export const PUPPET = { stage: { x: 14.6, z: 15.0 }, openS: 12, voteS: 125, voteEndS: 150, endS: 285 };
 
 // ───────── :45 百灯过桥 ─────────
 export const LANTERN_WALK = {

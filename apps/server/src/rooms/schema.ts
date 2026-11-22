@@ -63,6 +63,7 @@ export const PlazaState = schema({
   aneh: StaffS,
   incense: t.uint8().default(0), // 香炉里正在烧的香（束）
   vq: t.uint8().default(0), // 打小人排队人数
+  bq: t.uint8().default(0), // 烧烦恼排队人数
   evOff: t.float64().default(0), // 活动时钟偏移（只在本地测试时用）
   ev: t.string().default(''), // 正在进行的活动（开估 / 布袋戏 / 百灯过桥）的公开进度（JSON）
   lamps: t.uint16().default(0), // 石桥上点亮了哪几盏灯（位）

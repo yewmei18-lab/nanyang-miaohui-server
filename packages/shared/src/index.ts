@@ -10,3 +10,5 @@ export * from './events.ts';
 export * from './puppetPlays.ts';
 export * from './street.ts';
 export * from './batch5.ts';
+export * from './casino.ts';
+export * from './minigames.ts';
