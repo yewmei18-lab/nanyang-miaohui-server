@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Client } from '@colyseus/core';
 import {
   STORIES, storyTarget, WEEKLY_SPOT, weeklyVendor, dailyDiscoveries, DISCOVER_REWARD, isGiftable, giftName, GIFT_TIMEOUT_MS, INVITE_TIMEOUT_MS,
-  INVITE_NAMES, REDSTRING_MS, MAMAK_SHOP, GAME_CONFIG, MSG, PSTATE, klDay, STAMPS, ALL_WORKS, MASKS, type InviteKind,
+  INVITE_NAMES, REDSTRING_MS, MAMAK_SHOP, GAME_CONFIG, MSG, PSTATE, klDay, klMonth, STAMPS, ALL_WORKS, MASKS, type InviteKind,
 } from '@nanyang/shared';
 import { pool, tx } from '../db.ts';
 import { credit, buyItem } from '../wallet.ts';
@@ -307,12 +307,13 @@ export class Batch5 {
   private async album(cl: Client) {
     const pid = this.c.playerIdOf(cl.sessionId); if (!pid) return;
     try {
-      const [items, stories, stampDays, fort, first] = await Promise.all([
+      const [items, stories, stampDays, fort, first, season] = await Promise.all([
         pool.query('SELECT item, qty FROM player_items WHERE player_id=$1 AND qty>0', [pid]),
         pool.query('SELECT story, step, done_at FROM story_progress WHERE player_id=$1', [pid]),
         pool.query('SELECT count(DISTINCT day)::int days, count(*)::int n FROM stamps WHERE player_id=$1', [pid]),
         pool.query('SELECT count(*)::int n FROM fortune_daily WHERE player_id=$1', [pid]).catch(() => ({ rows: [{ n: 0 }] })),
         pool.query('SELECT created_at FROM players WHERE id=$1', [pid]),
+        pool.query('SELECT count FROM orange_season WHERE player_id=$1 AND season=$2', [pid, klMonth(Date.now())]).catch(() => ({ rows: [] as Array<{ count: number }> })),
       ]);
       const it = Object.fromEntries(items.rows.map((x: { item: string; qty: number }) => [x.item, x.qty]));
       cl.send('album', {
@@ -320,7 +321,7 @@ export class Batch5 {
         stories: STORIES.map((s) => { const r = stories.rows.find((x: { story: string }) => x.story === s.id); return { id: s.id, title: s.title, keepsake: s.keepsake, step: r?.step ?? 0, total: s.steps.length, done: !!r?.done_at }; }),
         works: ALL_WORKS.map((w) => ({ id: w.id, name: w.name, qty: it[`work:${w.id}`] ?? 0 })),
         masks: MASKS.map((mk) => ({ id: mk.id, name: mk.name, own: !!it[`mask:${mk.id}`] })),
-        redstring: it.redstring ?? 0, voucher: it.voucher ?? 0, oranges: it.orange ?? 0,
+        redstring: it.redstring ?? 0, voucher: it.voucher ?? 0, oranges: it.orange ?? 0, goldfish: it.goldfish ?? 0, seasonOranges: Number(season.rows[0]?.count ?? 0),
         stampDays: stampDays.rows[0]?.days ?? 0, stamps: stampDays.rows[0]?.n ?? 0, fortunes: fort.rows[0]?.n ?? 0,
       });
     } catch { cl.send('album', { error: true }); }

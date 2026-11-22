@@ -40,17 +40,18 @@ const SEAT_PX: Array<{ cushion: [number, number]; station: [number, number] }> =
   { cushion: [176, 1222], station: [100, 1160] },
   { cushion: [304, 1036], station: [250, 1010] },
 ];
-export const SEATS: SeatDef[] = SEAT_PX.map((s, id) => {
-  const c = pictureToGround(...s.cushion), st = pictureToGround(...s.station);
-  const yaw = Math.atan2(st.x - c.x, st.z - c.z);
+/** 2026-11-23：两个位并排在打小人摊正前面（摊子正面 x≈-3.7，摊子中间 z≈11.5），中间隔 1.7 米 */
+export const SEATS: SeatDef[] = [10.55, 12.25].map((z, id) => {
+  const c = { x: -1.75, z }, st = { x: -2.6, z };
   return {
     id,
     station: { x: st.x, z: st.z, w: 0.8, d: 0.8, h: 0.5 },
-    seat: { x: c.x, z: c.z, yaw },
-    approach: { x: c.x + 0.85, z: c.z - 0.2 },
-    hit: { x: (st.x + c.x * 0.4) / 1.4, y: 0.5, z: (st.z + c.z * 0.4) / 1.4 },
+    seat: { x: c.x, z: c.z, yaw: -Math.PI / 2 },
+    approach: { x: c.x + 0.85, z: c.z },
+    hit: { x: (st.x + c.x * 0.4) / 1.4, y: 0.5, z: st.z },
   };
 });
+void SEAT_PX;
 
 export const COLLIDERS: Box[] = SEATS.map((s) => ({
   id: `station_${s.id}`, kind: 'station', minX: s.station.x - 0.25, maxX: s.station.x + 0.25, minZ: s.station.z - 0.25, maxZ: s.station.z + 0.25, height: 0.5,

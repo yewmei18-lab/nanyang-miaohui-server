@@ -11,14 +11,17 @@ export * from './world_picture.ts';
 import { SEATS as VILLAIN_SEATS, SPAWN as PICTURE_SPAWN } from './world_picture.ts';
 import type { Box, SeatDef } from './world.ts';
 
-export const WORLD_VERSION = 'street-3d-2';
+export const WORLD_VERSION = 'street-3d-3';
 export const SPAWN = PICTURE_SPAWN;
 
 export type SeatKind = 'villain' | 'woodfish' | 'bath' | 'mamak' | 'pray' | 'fortune' | 'bazi' | 'burn' | 'lantern' | 'ring' | 'photo';
 export interface Seat3D extends SeatDef { kind: SeatKind; zone: number; /** 属于第几张桌（MAMAK） */ table?: number }
 
 /** 木鱼禅院：开放式木殿 */
-export const ZEN_HALL = { minX: 8.8, maxX: 17.8, minZ: 22.6, maxZ: 35.4, altarX: 17.2 };
+/** 木鱼禅院：2026-11-23 搬到河对岸（原来贴着天后宫），走第二座石桥过去 */
+export const ZEN_HALL = { minX: 23.8, maxX: 32.8, minZ: 22.6, maxZ: 35.4, altarX: 32.2 };
+/** 听雨的三口水缸：禅院南边一排 */
+export const RAIN_JARS = [0, 1, 2].map((i) => ({ x: ZEN_HALL.minX + 3.7 + i * 0.8, z: ZEN_HALL.minZ + 0.9 }));
 /** 洗衰运花园 */
 export const BATH_GARDEN = { minX: -17.8, maxX: -8.4, minZ: 22.6, maxZ: 35.4 };
 export const POOLS = [
@@ -44,7 +47,7 @@ export const MAMAK_TABLE_TOP_Y = 0.72;
 export const MAMAK_STOOL_Y = 0.52;
 /** 求签桌（天后宫前、功德箱右边）：签筒在桌上，站在桌前摇签 */
 /** 求签桌：2026-11-22 从香炉旁（挡路）搬到天后宫右边的殿前 */
-export const QIUQIAN = { x: 5.2, z: 25.85 };
+export const QIUQIAN = { x: 8.0, z: 25.9 };
 /** 命理阁：入口右手边第二间店屋的骑楼下，师傅坐在桌后，客人坐小凳 */
 export const MINGLI = { deskX: 5.85, z: 2.0, masterX: 6.27, stoolX: 5.3, stoolZ: 1.83, facadeX: 6.75 };
 /** 烧掉烦恼：街左前方三个金炉 */
@@ -70,7 +73,7 @@ export function ringLanding(a: number, p: number) {
   return { x: RING.origin.x + Math.cos(aa) * d, z: RING.origin.z + Math.sin(aa) * d };
 }
 /** 第 4 批：夜市街、童玩、灯笼巷、水边、戏台后台、入口的小地方（不坐下，走近就能玩） */
-export type SpotKind = 'story' | 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat' | 'casino';
+export type SpotKind = 'stage' | 'story' | 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat' | 'casino' | 'angpao' | 'goldfish' | 'riddle';
 export interface Spot { id: string; kind: SpotKind; x: number; z: number; r: number; label: string; face: number }
 export const SPOTS: Spot[] = [
   { id: 'tea', kind: 'tea', x: -16.4, z: 17.0, r: 2.2, label: '拉一杯茶', face: Math.PI / 2 },
@@ -84,13 +87,18 @@ export const SPOTS: Spot[] = [
   { id: 'wishrack', kind: 'wishrack', x: 10.4, z: -6.3, r: 1.8, label: '看祝福、留一句话', face: Math.PI },
   { id: 'shadow', kind: 'shadow', x: 11.6, z: -2.2, r: 2.0, label: '玩对对碰', face: 0 },
   { id: 'fish', kind: 'fish', x: 18.0, z: -4.2, r: 1.8, label: '撒鱼粮', face: Math.PI / 2 },
+  { id: 'stage', kind: 'stage', x: 12.6, z: 15.0, r: 1.8, label: '布袋戏台：玩戏偶 · 看几点开演', face: Math.PI / 2 },
   { id: 'backstage', kind: 'backstage', x: 16.45, z: 15.0, r: 1.8, label: '拉开布帘', face: -Math.PI / 2 },
   { id: 'drum', kind: 'drum', x: 15.5, z: 2.3, r: 1.8, label: '跟鼓师打鼓（一关比一关难）', face: 0 },
-  { id: 'rain', kind: 'rain', x: 10.2, z: 29.1, r: 1.3, label: '敲水缸听雨', face: -Math.PI / 2 },
+  { id: 'rain', kind: 'rain', x: ZEN_HALL.minX + 4.5, z: ZEN_HALL.minZ + 1.75, r: 1.3, label: '敲水缸听雨', face: -Math.PI / 2 },
   { id: 'photowall', kind: 'photowall', x: 4.9, z: -4.6, r: 1.8, label: '看老照片', face: 0 },
   { id: 'stamp', kind: 'stamp', x: 2.6, z: -1.3, r: 1.5, label: '领游园纸、盖章', face: 0 },
   { id: 'board', kind: 'board', x: 3.3, z: 3.6, r: 1.6, label: '看今日庙会', face: -Math.PI / 2 },
   { id: 'casino', kind: 'casino', x: -4.6, z: 0.2, r: 1.8, label: '游艺档（4 个小游戏）', face: 0 },
+  // 年味小玩意（2026-11-23）：老街的红包架、夜市街的金鱼盆、灯笼巷的灯谜架
+  { id: 'angpao', kind: 'angpao', x: -3.9, z: 5.6, r: 1.6, label: '抽红包（每天一个）', face: -Math.PI / 2 },
+  { id: 'goldfish', kind: 'goldfish', x: -14.5, z: 1.0, r: 1.5, label: '捞金鱼（2 金币一张纸网）', face: Math.PI / 2 },
+  { id: 'riddle', kind: 'riddle', x: 8.0, z: -4.0, r: 1.6, label: '猜灯谜（每天 3 题）', face: Math.PI },
 ];
 /** 橘猫每天藏的地方（按马来西亚日期轮换） */
 export const CAT_SPOTS = [
@@ -107,7 +115,7 @@ const villain: Seat3D[] = VILLAIN_SEATS.map((s) => ({ ...s, id: nextId++, kind: 
 
 // 木鱼禅院：两列四排矮桌，玩家坐在桌子西侧的蒲团上，面向东边佛台（+X）
 const zenTables: Array<{ x: number; z: number }> = [];
-for (const x of [11.6, 14.6]) for (const z of [25.4, 28.0, 30.6, 33.2]) zenTables.push({ x, z });
+for (const x of [ZEN_HALL.minX + 2.8, ZEN_HALL.minX + 5.8]) for (const z of [25.4, 28.0, 30.6, 33.2]) zenTables.push({ x, z });
 const woodfish: Seat3D[] = zenTables.map((t) => ({
   id: nextId++, kind: 'woodfish' as const, zone: 1,
   station: { x: t.x, z: t.z, w: 0.9, d: 0.6, h: 0.42 },
@@ -205,7 +213,15 @@ export const WALK_RECTS = [
  * 可以走的地方（2026-11-22 起）：整张地图的外框里面，除了房子、河、天后宫、姻缘树根这些“实心”的地方，哪里都能走。
  * （以前只能走几条长方形的路，很多空地走不进去。）小东西（桌子、摊、柱子）另外用 COLLIDERS 挡。
  */
-export const WORLD_BOUNDS = { minX: -17.8, maxX: 26.0, minZ: -12.9, maxZ: 37.0 };
+/** 第二座石桥：庙后过河去木鱼禅院 */
+export const BRIDGE2 = { x0: 18.2, x1: 22.8, z0: 28.35, z1: 29.65, z: 29.0 };
+/** 天后宫：2026-11-23 放大（19 米宽），台阶跟着变宽变高；台阶脚还在 z 25.6 */
+export const TEMPLE = { x: 1.0, z: 34.3, w: 19 };
+/** 天后宫台阶：z0 开始往上，z1 到顶，门口平台到 door */
+export const TEMPLE_STAIRS = { minX: -2.42, maxX: 4.42, z0: 25.6, z1: 29.15, top: 1.46, door: 29.65 };
+/** 天后宫门口：一对石狮子、两根旗杆 */
+export const TEMPLE_DECOR = { lions: [{ x: -3.45, z: 25.6 }, { x: 5.45, z: 25.6 }], poles: [{ x: -7.6, z: 25.4 }, { x: 10.3, z: 25.4 }] };
+export const WORLD_BOUNDS = { minX: -17.8, maxX: 33.6, minZ: -12.9, maxZ: 37.0 };
 const R = (minX: number, maxX: number, minZ: number, maxZ: number) => ({ minX, maxX, minZ, maxZ });
 export const SOLID_RECTS = [
   // 西边一排店屋（主街和夜市街中间），中间留童玩巷
@@ -213,9 +229,9 @@ export const SOLID_RECTS = [
   // 东边一排店屋，中间留灯笼巷
   ...[[-14.3, -7.7], [-1.25, 5.25], [5.25, 11.75]].map(([a, b]) => R(6.5, 13.1, a, b)),
   // 天后宫：两边和后面是殿；正中间是台阶，可以走上去到门口
-  R(-7.0, -2.3, 26.4, 40), R(3.1, 7.8, 26.4, 40), R(-2.3, 3.1, 28.8, 40),
+  R(TEMPLE.x - 9.6, TEMPLE_STAIRS.minX, 26.6, 45), R(TEMPLE_STAIRS.maxX, TEMPLE.x + 9.6, 26.6, 45), R(TEMPLE_STAIRS.minX, TEMPLE_STAIRS.maxX, TEMPLE_STAIRS.door, 45),
   // 河（桥上可以过）
-  R(18.7, 22.3, -20, -2.6), R(18.7, 22.3, -1.4, 40),
+  R(18.7, 22.3, -20, -2.6), R(18.7, 22.3, -1.4, BRIDGE2.z0 + 0.1), R(18.7, 22.3, BRIDGE2.z1 - 0.1, 45),
   // 姻缘树：树干和垂下来的气根（站在树前许愿的地方在外面）
   R(3.9, 7.3, 12.3, 16.7),
   // 禅院佛台
@@ -227,7 +243,7 @@ export function insideWalk(x: number, z: number): boolean {
   return true;
 }
 /** 天后宫台阶：z 25.6 开始往上，28.4 到顶，门口平台到 29.4 */
-export const TEMPLE_STAIRS = { minX: -2.3, maxX: 3.1, z0: 25.6, z1: 28.4, top: 1.15, door: 28.8 };
+
 
 /** 石桥桥面高度（沿 x 拱起） */
 export const bridgeY = (x: number) => Math.max(0, Math.sin(Math.PI * (x - 18.2) / 4.6)) * 0.88;
@@ -239,6 +255,7 @@ export function groundY(x: number, z: number): number {
   if (x > T.minX && x < T.maxX && z > T.z0) return z >= T.z1 ? T.top : ((z - T.z0) / (T.z1 - T.z0)) * T.top;
   const B = BRIDGE_DECK;
   if (x > B.x0 && x < B.x1 && z > B.z0 && z < B.z1) return bridgeY(x);
+  if (x > BRIDGE2.x0 && x < BRIDGE2.x1 && z > BRIDGE2.z0 && z < BRIDGE2.z1) return bridgeY(x);
   for (const p of POOLS) {
     const r = Math.hypot(x - p.x, z - p.z);
     if (r < POOL_R - 0.12) {
@@ -268,15 +285,17 @@ export const COLLIDERS: Box[] = [
   b('wishRack', 'prop', 10.4, -6.75, 1.1, 0.2, 1.8), b('shadowLamp', 'prop', 13.05, -2.15, 0.15, 0.15, 1.6), b('shadowWall', 'building', 11.6, -1.75, 1.3, 0.12, 2.6),
   b('weeklyTable', 'prop', -17.1, 8.0, 0.5, 0.8, 1.0),
   b('casinoTable', 'table', -5.55, 0.2, 0.35, 0.75, 0.9), // 原来烧烦恼第一个炉的位置
+  // 红包架（老街西边，面向街）、金鱼盆（夜市街东边，贴着店屋后墙）、灯谜架（灯笼巷南边，面向北）
+  b('angpaoRack', 'prop', -4.75, 5.6, 0.15, 0.75, 2.0), b('goldfishTub', 'prop', -13.4, 1.0, 0.55, 0.55, 0.5), b('riddleFrame', 'prop', 8.0, -5.0, 0.85, 0.12, 2.3),
   b('drumRack', 'prop', 15.5, 3.1, 0.35, 0.35, 1.2), b('photoWall', 'building', 4.9, -3.95, 1.3, 0.15, 2.4),
   b('stampTable', 'table', 2.6, -0.55, 0.45, 0.3, 0.8), b('fairBoard', 'prop', 4.15, 3.6, 0.2, 0.55, 2.0),
-  ...[28.3, 29.1, 29.9].map((z, i) => b(`rainJar${i}`, 'prop', 9.45, z, 0.22, 0.22, 0.6)),
+  ...RAIN_JARS.map((j, i) => b(`rainJar${i}`, 'prop', j.x, j.z, 0.22, 0.22, 0.6)),
   b('guessTable', 'table', -2.35, 22.75, 0.45, 0.45, 0.8), b('guessHost', 'npc', -3.15, 22.75, 0.25, 0.25, 1.5),
   b('puppetStage', 'building', 14.8, 15.0, 0.7, 1.85, 3),
   b('qiuqian', 'table', QIUQIAN.x, QIUQIAN.z, 0.55, 0.28, 0.85),
   b('mingliDesk', 'table', 5.9, MINGLI.z, 0.25, 0.62, 0.75), b('mingliMaster', 'npc', MINGLI.masterX, MINGLI.z, 0.25, 0.3, 1.2),
   b('banyanTrunk', 'tree', 5.6, 14.5, 1.1, 1.1, 5),
-  b('yuelao', 'building', 6.4, 21.4, 1.7, 1.5, 4),
+  b('yuelao', 'building', 16.0, 20.4, 2.1, 1.8, 4),
   b('gateL', 'prop', -3.6, -3.5, 0.5, 0.5, 4), b('gateR', 'prop', 3.6, -3.5, 0.5, 0.5, 4),
   ...BURN_POTS.map((p, i) => b(`burnPot${i}`, 'prop', p.x, p.z, 0.5, 0.5, 1)),
   b('lanternTable', 'table', LANTERN_TABLE.x, LANTERN_TABLE.z, 0.4, 0.55, 0.8),
@@ -285,12 +304,17 @@ export const COLLIDERS: Box[] = [
   // 禅院：矮桌、西侧柱子
   ...woodfish.map((s) => b(`zentable_${s.id}`, 'table', s.station.x, s.station.z, 0.32, 0.48, 0.42)),
   ...[22.9, 26.2, 31.8, 35.1].map((z, i) => b(`zenCol${i}`, 'pillar', ZEN_HALL.minX + 0.3, z, 0.2, 0.2, 4)),
+  // 禅院南北两边是木栏杆（只有西边对着桥是入口）
+  b('zenRailS', 'prop', (ZEN_HALL.minX + ZEN_HALL.maxX) / 2 + 0.4, ZEN_HALL.minZ + 0.25, (ZEN_HALL.maxX - ZEN_HALL.minX) / 2 - 0.4, 0.15, 1.0),
+  b('zenRailN', 'prop', (ZEN_HALL.minX + ZEN_HALL.maxX) / 2 + 0.4, ZEN_HALL.maxZ - 0.25, (ZEN_HALL.maxX - ZEN_HALL.minX) / 2 - 0.4, 0.15, 1.0),
   // 花园：浴池、灯柱、椰树
   ...POOLS.map((p, i) => b(`pool_${i}`, 'pool', p.x, p.z, POOL_R - 0.25, POOL_R - 0.25, 0.6)),
   ...[[-12.8, 29.8], [-17.3, 23.1], [-8.8, 23.1], [-17.3, 34.9], [-8.8, 34.9]].map(([x, z], i) => b(`lamp${i}`, 'prop', x, z, 0.15, 0.15, 1.5)),
   b('palmG', 'tree', -17, 23.4, 0.3, 0.3, 9),
+  ...TEMPLE_DECOR.lions.map((l, i) => b(`shishi${i}`, 'prop', l.x, l.z, 0.55, 0.55, 2.2)),
+  ...TEMPLE_DECOR.poles.map((l, i) => b(`flagPole${i}`, 'prop', l.x, l.z, 0.2, 0.2, 8)),
   // 椰树树干、灯柱（以前只挡镜头，人可以穿过去）
-  ...[[-7.0, 30], [8.5, 30], [-12, 21], [12.5, 20.5], [10.5, 2], [-12.5, 9], [24.6, -6], [24.8, 2.6], [16, -11], [14, 4.8]].map(([x, z], i) => b(`palm${i}`, 'tree', x, z, 0.3, 0.3, 9)),
+  ...[[-7.0, 30], [8.5, 30], [-12, 21], [17.6, 11.6], [10.5, 2], [-12.5, 9], [24.6, -6], [24.8, 2.6], [16, -11], [14, 4.8]].map(([x, z], i) => b(`palm${i}`, 'tree', x, z, 0.3, 0.3, 9)),
   ...[[23.4, -5], [23.4, 1.5], [17.6, -6.5], [17.6, 3.5]].map(([x, z], i) => b(`eastLamp${i}`, 'prop', x, z, 0.15, 0.15, 1.5)),
 ];
 /** 入座/离座的自动走路：可以走进浴池、走到凳子上 */

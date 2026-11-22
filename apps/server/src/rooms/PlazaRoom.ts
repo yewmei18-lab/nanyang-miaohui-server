@@ -17,6 +17,7 @@ import { StreetEvents } from '../streetEvents.ts';
 import { Batch5 } from './batch5.ts';
 import { Minigames } from './minigames.ts';
 import { Casino } from './casino.ts';
+import { Festive } from './festive.ts';
 
 type QKind = 'villain' | 'burn';
 const V = GAME_CONFIG.villain;
@@ -118,6 +119,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     addItem: (pid, item, d) => this.addItem(pid, item, d),
   });
   casino = new Casino({ state: this.state as never, playerIdOf: (sid) => this.internal.get(sid)?.playerId });
+  festive = new Festive({ state: this.state as never, clients: this.clients as never, playerIdOf: (sid) => this.internal.get(sid)?.playerId });
   private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
   /** 排队：打小人、烧烦恼（位置少，大家轮流） */
@@ -223,7 +225,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     // 只给附近的人看的小动作（童玩、手影、鱼、鼓、水缸、五粒子）：服务器只转发，不记账
     const lastFx = new Map<string, number>();
     this.onMessage('fx', (client, m: { k?: unknown; v?: unknown; x?: unknown; z?: unknown }) => {
-      const k = typeof m?.k === 'string' ? m.k : ''; if (!['eraser', 'marble', 'hop', 'shadow', 'fish', 'drum', 'rain', 'batu'].includes(k)) return;
+      const k = typeof m?.k === 'string' ? m.k : ''; if (!['eraser', 'marble', 'hop', 'shadow', 'fish', 'drum', 'rain', 'batu', 'puppet'].includes(k)) return;
       const now = Date.now(); if (now - (lastFx.get(client.sessionId) ?? 0) < 150) return; lastFx.set(client.sessionId, now);
       const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(x * 100) / 100 : 0);
       this.broadcast('fx', { sid: client.sessionId, k, v: typeof m?.v === 'string' ? m.v.slice(0, 16) : num(m?.v), x: num(m?.x), z: num(m?.z) });
@@ -233,6 +235,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.b5.register((type, fn) => this.onMessage(type, fn));
     this.minigames.register((type, fn) => this.onMessage(type, fn));
     this.casino.register((type, fn) => this.onMessage(type, fn));
+    this.festive.register((type, fn) => this.onMessage(type, fn));
     this.onMessage('orange.give', (client, m: { to?: unknown }) => { void this.onOrangeGive(client, m); });
     // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
     this.onMessage('debug.lion', (_c, m: { at?: unknown }) => {
@@ -358,6 +361,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.state.players.set(client.sessionId, p);
     metrics.joins++;
     if (!takeover) void this.b5.log(auth.playerId, 'join', String(this.state.no));
+    void this.festive.onJoin(client.sessionId, auth.playerId);
 
     try { client.send(MSG.S_WALLET, await getWallet(auth.playerId)); } catch { /* */ }
     if (!takeover) { const q = await pool.query("SELECT qty FROM player_items WHERE player_id=$1 AND item='orange'", [auth.playerId]).catch(() => null); p.orng = Math.min(255, q?.rows[0]?.qty ?? 0); }
@@ -403,6 +407,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const p = this.state.players.get(client.sessionId);
     this.cancelOrder(it, 'left');
     this.b5.onLeave(client.sessionId);
+    this.festive.onLeave(client.sessionId);
     this.leaveVillainQueue(client.sessionId);
     if (p && p.seat >= 0) this.freeSeat(p.seat);
     it.bath = null;
@@ -422,6 +427,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.unsubFlush?.();
     if (this.wfTimer) clearInterval(this.wfTimer);
     void this.flushWoodfish();
+    this.festive.dispose();
   }
 
   // ───────────────────── 移动 ─────────────────────
@@ -907,6 +913,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
         orangeTaken.set(key, got + 1); if (orangeTaken.size > 5000) orangeTaken.clear();
         o.by = sid; p.orng = Math.min(255, p.orng + 1);
         void this.addItem(it.playerId, 'orange', 1);
+        void this.festive.orangeCaught(it.playerId);
         this.clients.find((c) => c.sessionId === sid)?.send('orange.got', { total: p.orng });
         break;
       }
