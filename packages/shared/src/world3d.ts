@@ -65,7 +65,7 @@ export function ringLanding(a: number, p: number) {
   return { x: RING.origin.x + Math.cos(aa) * d, z: RING.origin.z + Math.sin(aa) * d };
 }
 /** 第 4 批：夜市街、童玩、灯笼巷、水边、戏台后台、入口的小地方（不坐下，走近就能玩） */
-export type SpotKind = 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat';
+export type SpotKind = 'story' | 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat';
 export interface Spot { id: string; kind: SpotKind; x: number; z: number; r: number; label: string; face: number }
 export const SPOTS: Spot[] = [
   { id: 'tea', kind: 'tea', x: -16.4, z: 17.0, r: 2.2, label: '拉一杯茶', face: Math.PI / 2 },
@@ -235,6 +235,7 @@ export const COLLIDERS: Box[] = [
   b('paperRack', 'prop', -12.9, 14.0, 0.25, 0.9, 1.8), b('batuTable', 'table', -12.9, 20.0, 0.35, 0.45, 0.5),
   b('eraserTable', 'table', -9.0, -4.2, 0.55, 0.4, 0.8), b('marbleBoard', 'prop', -11.9, -1.95, 0.45, 0.25, 1.0),
   b('wishRack', 'prop', 10.4, -6.75, 1.1, 0.2, 1.8), b('shadowLamp', 'prop', 13.05, -2.15, 0.15, 0.15, 1.6), b('shadowWall', 'building', 11.6, -1.75, 1.3, 0.12, 2.6),
+  b('weeklyTable', 'prop', -17.1, 8.0, 0.5, 0.8, 1.0),
   b('drumRack', 'prop', 15.5, 3.1, 0.35, 0.35, 1.2), b('photoWall', 'building', 4.9, -3.95, 1.3, 0.15, 2.4),
   b('stampTable', 'table', 2.6, -0.55, 0.45, 0.3, 0.8), b('fairBoard', 'prop', 4.15, 3.6, 0.2, 0.55, 2.0),
   ...[28.3, 29.1, 29.9].map((z, i) => b(`rainJar${i}`, 'prop', 9.45, z, 0.22, 0.22, 0.6)),

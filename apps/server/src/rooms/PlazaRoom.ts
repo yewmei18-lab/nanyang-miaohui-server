@@ -14,6 +14,7 @@ import { getWallet, spend, spendBoth, credit, refund, placeMamakOrder, setOrderS
 import { hitPipeline, leaderboard, upsertTarget, sealSession, getSessionResult } from '../hits.ts';
 import { metrics } from '../metrics.ts';
 import { StreetEvents } from '../streetEvents.ts';
+import { Batch5 } from './batch5.ts';
 
 const V = GAME_CONFIG.villain;
 const WF = GAME_CONFIG.woodfish;
@@ -23,7 +24,7 @@ const MK = GAME_CONFIG.mamak;
 const PR = GAME_CONFIG.pray;
 type MenuItem = (typeof MK.menu)[number];
 type OrderStatus = 'ordered' | 'cooking' | 'serving' | 'delivered' | 'eating' | 'done' | 'cancelled';
-interface MamakOrder { id: string; requestId: string; it: Internal; seatId: number; item: MenuItem; status: OrderStatus; eatTimer?: NodeJS.Timeout }
+interface MamakOrder { id: string; requestId: string; it: Internal; seatId: number; item: MenuItem; status: OrderStatus; eatTimer?: NodeJS.Timeout; voucher?: boolean }
 interface StaffTask { kind: 'visit' | 'deliver'; seatId: number; order?: MamakOrder }
 type StaffPhase = 'idle' | 'walk' | 'ask' | 'cook' | 'place' | 'return' | 'host';
 /** Aneh 走的通道：两排桌子中间（x=-2.9）和街边（x=-0.2），不穿桌子 */
@@ -104,6 +105,12 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     broadcast: (t, m) => this.broadcast(t, m),
     stamp: (sid, st) => { void this.stamp(sid, st); },
   });
+  b5 = new Batch5({
+    state: this.state as never, clients: this.clients as never,
+    playerIdOf: (sid) => this.internal.get(sid)?.playerId,
+    broadcast: (t, m) => this.broadcast(t, m),
+    addItem: (pid, item, d) => this.addItem(pid, item, d),
+  });
   private lanterns: Array<{ id: string; sid: string; x: number; z: number; t0: number; wish: string; pub: boolean; seed: number }> = [];
   /** 打小人排队：先到先打；空位会先留给排第一的人一段时间 */
   private vQueue: string[] = [];
@@ -130,6 +137,8 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       if (process.env.ALLOW_DEBUG !== '1' || typeof m?.min !== 'number') return;
       const t = (Date.now() / 1000) % 3600; this.state.evOff = (m.min * 60 + (typeof m.sec === 'number' ? m.sec : 0) - t) * 1000; this.orangeHour = -1;
     });
+    // 本地测试：直接盖一个章（走完整的盖章流程，包括每日三个小发现的奖励）
+    this.onMessage('debug.stamp', (client, m: { stamp?: unknown }) => { if (process.env.ALLOW_DEBUG === '1' && typeof m?.stamp === 'string') void this.stamp(client.sessionId, m.stamp); });
     // ── 第 4 批：街上的小东西 ──
     const near = (sid: string, kind: string) => { const p = this.state.players.get(sid); const sp = SPOTS.find((x) => x.kind === kind); return !!p && !!sp && p.st === PSTATE.MOVING && Math.hypot(p.x - sp.x, p.z - sp.z) < sp.r + 0.8; };
     const holdTimers = new Map<string, NodeJS.Timeout>();
@@ -206,6 +215,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       if (k === 'eraser' || k === 'marble' || k === 'hop' || k === 'batu') void this.stamp(client.sessionId, 'kids');
       if (k === 'drum') void this.stamp(client.sessionId, 'bridge');
     });
+    this.b5.register((type, fn) => this.onMessage(type, fn));
     this.onMessage('orange.give', (client, m: { to?: unknown }) => { void this.onOrangeGive(client, m); });
     // 本地测试：把舞狮时钟拨到第 at 秒（线上不开放）
     this.onMessage('debug.lion', (_c, m: { at?: unknown }) => {
@@ -252,7 +262,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.onMessage('bath.beat', (client, m: { visible?: unknown }) => this.onBathBeat(client, m));
     this.onMessage('mamak.call', (client) => this.onMamakCall(client));
     this.onMessage('mamak.decline', (client) => this.onMamakDecline(client));
-    this.onMessage('mamak.order', (client, m: { item?: unknown; requestId?: unknown }) => { void this.onMamakOrder(client, m); });
+    this.onMessage('mamak.order', (client, m: { item?: unknown; requestId?: unknown; voucher?: unknown }) => { void this.onMamakOrder(client, m); });
     this.onMessage('mamak.eat', (client) => this.onMamakEat(client));
     this.onMessage('pray.incense', (client) => this.onIncense(client));
     this.onMessage('fortune.draw', (client, m: { requestId?: unknown }) => { void this.onFortune(client, m); });
@@ -330,6 +340,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.internal.set(client.sessionId, it);
     this.state.players.set(client.sessionId, p);
     metrics.joins++;
+    if (!takeover) void this.b5.log(auth.playerId, 'join', String(this.state.no));
 
     try { client.send(MSG.S_WALLET, await getWallet(auth.playerId)); } catch { /* */ }
     if (!takeover) { const q = await pool.query("SELECT qty FROM player_items WHERE player_id=$1 AND item='orange'", [auth.playerId]).catch(() => null); p.orng = Math.min(255, q?.rows[0]?.qty ?? 0); }
@@ -374,6 +385,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     if (!it || it.superseded) return;
     const p = this.state.players.get(client.sessionId);
     this.cancelOrder(it, 'left');
+    this.b5.onLeave(client.sessionId);
     this.leaveVillainQueue(client.sessionId);
     if (p && p.seat >= 0) this.freeSeat(p.seat);
     it.bath = null;
@@ -885,7 +897,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
   async stamp(sid: string, stamp: string) {
     const it = this.internal.get(sid); if (!it || !STAMPS.some((x) => x.id === stamp)) return;
     const r = await pool.query(`INSERT INTO stamps(player_id, day, stamp) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING stamp`, [it.playerId, klDay(Date.now()), stamp]).catch(() => null);
-    if (r?.rowCount) this.clients.find((c) => c.sessionId === sid)?.send('stamp.new', { stamp });
+    if (r?.rowCount) { this.clients.find((c) => c.sessionId === sid)?.send('stamp.new', { stamp }); void this.b5.afterStamp(sid, stamp); }
   }
   /** 第一次玩免费：每个账号每种玩法一次（原子领取，连点也只算一次） */
   private async claimFreeTry(playerId: string, game: string): Promise<boolean> {
@@ -1077,7 +1089,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.staffQueue = this.staffQueue.filter((t) => !(t.kind === 'visit' && t.seatId === p.seat));
   }
 
-  private async onMamakOrder(client: Client, m: { item?: unknown; requestId?: unknown }) {
+  private async onMamakOrder(client: Client, m: { item?: unknown; requestId?: unknown; voucher?: unknown }) {
     const it = this.internal.get(client.sessionId); const p = this.state.players.get(client.sessionId);
     if (!it || !p) return;
     const requestId = typeof m?.requestId === 'string' ? m.requestId.slice(0, 64) : '';
@@ -1091,19 +1103,22 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const orderId = randomUUID();
     let r;
     const mine = !it.orderBusy; it.orderBusy = requestId;
-    try { r = await placeMamakOrder(it.playerId, orderId, requestId, item); } catch { return err('db_unavailable'); } finally { if (mine) it.orderBusy = null; }
-    if (!r.ok) return err('insufficient', { wallet: r.wallet });
+    const voucher = m?.voucher === true;
+    try { r = await placeMamakOrder(it.playerId, orderId, requestId, item, Date.now(), voucher); } catch { return err('db_unavailable'); } finally { if (mine) it.orderBusy = null; }
+    if (!r.ok) return err(r.error === 'no_voucher' ? 'no_voucher' : 'insufficient', { wallet: r.wallet });
+    if (voucher && !r.replay) this.b5.sendItems(client.sessionId);
     client.send(MSG.S_WALLET, r.wallet);
     // 同一个 requestId 重复点：数据库返回原来那张单 → 只回复，不再建第二张、不再派送
     const cur = it.order as MamakOrder | null; // 等数据库期间可能已经建好（同一次点击的第一条）
     if (r.replay) return client.send('mamak.order', { ok: true, requestId, orderId: r.orderId, item: item.id, status: cur?.id === r.orderId ? cur.status : 'closed' });
     // 扣款期间离座/断线：立刻退款
     if (p.seat !== seatId || p.st !== PSTATE.SEATED_IDLE || !this.internal.has(this.keyOf(it) ?? '')) {
-      void refund(it.playerId, `mamak:${r.orderId}`, 'mamak_cancel').then((x) => this.sendTo(it, MSG.S_WALLET, x.wallet)).catch(() => {});
+      if (voucher) void this.addItem(it.playerId, 'voucher', 1); else void refund(it.playerId, `mamak:${r.orderId}`, 'mamak_cancel').then((x) => this.sendTo(it, MSG.S_WALLET, x.wallet)).catch(() => {});
       void setOrderStatus(r.orderId, 'cancelled');
       return err('not_seated');
     }
-    const order: MamakOrder = { id: r.orderId, requestId, it, seatId, item, status: 'ordered' };
+    const order: MamakOrder = { id: r.orderId, requestId, it, seatId, item, status: 'ordered', voucher };
+    if (voucher) void this.b5.log(it.playerId, 'voucher_use', item.id);
     it.order = order;
     // 正在桌边问的就是这桌：直接回去做；不然排队
     if (this.staff.task?.kind === 'visit' && this.staff.task.seatId === seatId) { this.staff.task = null; this.staffQueue.unshift({ kind: 'deliver', seatId, order }); this.staff.phase = 'idle'; }
@@ -1143,6 +1158,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     const seat = this.state.seats[o.seatId]; if (seat) seat.food = '';
     this.staffQueue = this.staffQueue.filter((t) => t.order !== o);
     if (this.staff.task?.order === o) this.staffDone();
+    if (o.voucher) { void this.addItem(it.playerId, 'voucher', 1).then(() => this.sendTo(it, 'mamak.status', { phase: 'refunded', item: o.item.id, coins: 0, reason, voucher: true })); return; }
     void refund(it.playerId, `mamak:${o.id}`, 'mamak_cancel').then((x) => {
       this.sendTo(it, MSG.S_WALLET, x.wallet);
       if (x.ok && !x.replay) this.sendTo(it, 'mamak.status', { phase: 'refunded', item: o.item.id, coins: o.item.price, reason });

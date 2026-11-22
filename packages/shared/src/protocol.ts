@@ -50,7 +50,7 @@ export interface SessionResult {
 export interface WalletView { coins: number; energy: number; maxEnergy: number; nextEnergyInMs: number | null }
 
 /** 表情（同房广播，服务器只接受清单内的） */
-export const EMOTES = ['😊', '👋', '🙏', '😂', '❤️', '👍', '😤', '🎉', '😋', '🍵', '🤤', '😭', '🥰', '😎', '🧧', '💸'] as const;
+export const EMOTES = ['😊', '👋', '🙏', '😂', '❤️', '👍', '😤', '🎉', '😋', '🍵', '🤤', '😭', '🥰', '😎', '🧧', '💸', '🙇', '💃', '🙌'] as const;
 /** 聊天：同房实时，每条最多 40 字，每人约 1.2 秒一条 */
 export const CHAT = { maxChars: 40, minGapMs: 1200 } as const;
 /** 清理聊天文字：去掉控制字符和尖括号，压缩空白；空的返回 null */

@@ -17,6 +17,10 @@ export const PlayerS = schema({
   lamp: t.boolean().default(false), // 百灯过桥：手上提着灯
   hold: t.string().default(''), // 手上拿着的东西：tea / ice:玫瑰红色,班兰绿色
   mask: t.string().default(''), // 戴着的面具
+  tie: t.string().default(''), // 第 5 批：正在和谁牵红绳（对方的 sid）
+  show: t.string().default(''), // 坐在 Mamak 时摆在桌上的作品（work id）
+  nogift: t.boolean().default(false), // 不收礼物
+  noinv: t.boolean().default(false), // 不接受邀请（合照/斗擦胶/红绳）
 }, 'Player');
 export type PlayerS = SchemaType<typeof PlayerS>;
 

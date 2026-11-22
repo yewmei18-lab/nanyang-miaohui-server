@@ -145,11 +145,18 @@ export async function walletRaw(playerId: string) {
 
 export type OrderResult = { ok: true; orderId: string; replay: boolean; wallet: WalletView } | { ok: false; error: 'insufficient'; wallet: WalletView };
 /** MAMAK 下单：建单 + 扣金币在同一事务；同一 requestId 返回原来那张单，不重复扣 */
-export async function placeMamakOrder(playerId: string, orderId: string, requestId: string, item: { id: string; price: number; energy: number }, now = Date.now()): Promise<OrderResult> {
+export async function placeMamakOrder(playerId: string, orderId: string, requestId: string, item: { id: string; price: number; energy: number }, now = Date.now(), voucher = false): Promise<OrderResult | { ok: false; error: 'no_voucher'; wallet: WalletView }> {
   return tx(async (c) => {
     const w = await lockAndRegen(c, playerId, now);
     const ex = await c.query('SELECT id FROM mamak_orders WHERE player_id=$1 AND request_id=$2', [playerId, requestId]);
     if (ex.rowCount) { await writeWallet(c, playerId, w); return { ok: true as const, orderId: ex.rows[0].id as string, replay: true, wallet: toView(w, now) }; }
+    if (voucher) { // 第 5 批：用朋友请的券，这一杯不用钱（券和单在同一个事务里）
+      const v = await c.query(`UPDATE player_items SET qty=qty-1, updated_at=now() WHERE player_id=$1 AND item='voucher' AND qty>=1 RETURNING qty`, [playerId]);
+      if (!v.rowCount) { await writeWallet(c, playerId, w); return { ok: false as const, error: 'no_voucher' as const, wallet: toView(w, now) }; }
+      await c.query(`INSERT INTO mamak_orders(id, player_id, request_id, item, price, energy, status) VALUES ($1,$2,$3,$4,0,$5,'ordered')`, [orderId, playerId, requestId, item.id, item.energy]);
+      await writeWallet(c, playerId, w);
+      return { ok: true as const, orderId, replay: false, wallet: toView(w, now) };
+    }
     if (w.coins < item.price) { await writeWallet(c, playerId, w); return { ok: false as const, error: 'insufficient' as const, wallet: toView(w, now) }; }
     w.coins -= item.price;
     await c.query(`INSERT INTO ledger(player_id, asset, delta, reason, source_id, idempotency_key, config_version) VALUES ($1,'coins',$2,'mamak_order',$3,$4,$5)`,
@@ -177,5 +184,20 @@ export async function spendBoth(playerId: string, coins: number, energy: number,
     await c.query(`INSERT INTO ledger(player_id, asset, delta, reason, source_id, idempotency_key, config_version) VALUES ($1,'energy',$2,$3,$4,$5,$6)`, [playerId, -energy, reason, sourceId, `${key}:energy`, CONFIG_VERSION]);
     await writeWallet(c, playerId, w);
     return { ok: true as const, replay: false, wallet: toView(w, now), ledgerId: Number(ins.rows[0].id) };
+  });
+}
+
+/** 第 5 批：用金币买一样东西（面人、花灯、请客券）：扣钱和拿到东西在同一个事务；同一个 key 重试只算一次 */
+export async function buyItem(playerId: string, price: number, item: string, reason: string, key: string, now = Date.now()): Promise<{ ok: true; replay: boolean; wallet: WalletView } | { ok: false; error: 'insufficient'; wallet: WalletView }> {
+  return tx(async (c) => {
+    const w = await lockAndRegen(c, playerId, now);
+    const ex = await c.query('SELECT 1 FROM ledger WHERE idempotency_key=$1', [key]);
+    if (ex.rowCount) { await writeWallet(c, playerId, w); return { ok: true as const, replay: true, wallet: toView(w, now) }; }
+    if (w.coins < price) { await writeWallet(c, playerId, w); return { ok: false as const, error: 'insufficient' as const, wallet: toView(w, now) }; }
+    w.coins -= price;
+    await c.query(`INSERT INTO ledger(player_id, asset, delta, reason, source_id, idempotency_key, config_version) VALUES ($1,'coins',$2,$3,$4,$5,$6)`, [playerId, -price, reason, item, key, CONFIG_VERSION]);
+    await c.query(`INSERT INTO player_items(player_id, item, qty) VALUES ($1,$2,1) ON CONFLICT (player_id, item) DO UPDATE SET qty=player_items.qty+1, updated_at=now()`, [playerId, item]);
+    await writeWallet(c, playerId, w);
+    return { ok: true as const, replay: false, wallet: toView(w, now) };
   });
 }
