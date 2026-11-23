@@ -13,3 +13,4 @@ export * from './batch5.ts';
 export * from './casino.ts';
 export * from './minigames.ts';
 export * from './festive.ts';
+export * from './walls.ts';

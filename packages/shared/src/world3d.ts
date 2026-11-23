@@ -73,7 +73,7 @@ export function ringLanding(a: number, p: number) {
   return { x: RING.origin.x + Math.cos(aa) * d, z: RING.origin.z + Math.sin(aa) * d };
 }
 /** 第 4 批：夜市街、童玩、灯笼巷、水边、戏台后台、入口的小地方（不坐下，走近就能玩） */
-export type SpotKind = 'stage' | 'story' | 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat' | 'casino' | 'angpao' | 'goldfish' | 'riddle';
+export type SpotKind = 'stage' | 'story' | 'tea' | 'ice' | 'mask' | 'weekly' | 'paper' | 'batu' | 'eraser' | 'marble' | 'hop' | 'wishrack' | 'shadow' | 'fish' | 'backstage' | 'drum' | 'rain' | 'photowall' | 'stamp' | 'board' | 'cat' | 'casino' | 'angpao' | 'goldfish' | 'riddle' | 'yuelao';
 export interface Spot { id: string; kind: SpotKind; x: number; z: number; r: number; label: string; face: number }
 export const SPOTS: Spot[] = [
   { id: 'tea', kind: 'tea', x: -16.4, z: 17.0, r: 2.2, label: '拉一杯茶', face: Math.PI / 2 },
@@ -99,6 +99,7 @@ export const SPOTS: Spot[] = [
   { id: 'angpao', kind: 'angpao', x: -3.9, z: 5.6, r: 1.6, label: '抽红包（每天一个）', face: -Math.PI / 2 },
   { id: 'goldfish', kind: 'goldfish', x: -14.5, z: 1.0, r: 1.5, label: '捞金鱼（2 金币一张纸网）', face: Math.PI / 2 },
   { id: 'riddle', kind: 'riddle', x: 8.0, z: -4.0, r: 1.6, label: '猜灯谜（每天 3 题）', face: Math.PI },
+  { id: 'yuelao', kind: 'yuelao', x: 13.4, z: 20.4, r: 1.8, label: '拜月老 · 抽姻缘签', face: Math.PI / 2 },
 ];
 /** 橘猫每天藏的地方（按马来西亚日期轮换） */
 export const CAT_SPOTS = [
@@ -222,6 +223,8 @@ export const TEMPLE_STAIRS = { minX: -2.42, maxX: 4.42, z0: 25.6, z1: 29.15, top
 /** 天后宫门口：一对石狮子、两根旗杆 */
 export const TEMPLE_DECOR = { lions: [{ x: -3.45, z: 25.6 }, { x: 5.45, z: 25.6 }], poles: [{ x: -7.6, z: 25.4 }, { x: 10.3, z: 25.4 }] };
 export const WORLD_BOUNDS = { minX: -17.8, maxX: 33.6, minZ: -12.9, maxZ: 37.0 };
+/** 河东岸只留 4m 宽步道（外面是围墙）；禅院南边的墙 */
+export const EAST_BANK_WALL_X = 26.5, ZEN_SOUTH_WALL_Z = 22.4;
 const R = (minX: number, maxX: number, minZ: number, maxZ: number) => ({ minX, maxX, minZ, maxZ });
 export const SOLID_RECTS = [
   // 西边一排店屋（主街和夜市街中间），中间留童玩巷
@@ -236,6 +239,8 @@ export const SOLID_RECTS = [
   R(3.9, 7.3, 12.3, 16.7),
   // 禅院佛台
   R(ZEN_HALL.altarX - 0.8, ZEN_HALL.maxX + 0.2, ZEN_HALL.minZ, ZEN_HALL.maxZ),
+  // 河东岸围墙外面
+  R(EAST_BANK_WALL_X, 45, -20, ZEN_SOUTH_WALL_Z),
 ];
 export function insideWalk(x: number, z: number): boolean {
   const B = WORLD_BOUNDS; if (x < B.minX || x > B.maxX || z < B.minZ || z > B.maxZ) return false;
@@ -314,7 +319,7 @@ export const COLLIDERS: Box[] = [
   ...TEMPLE_DECOR.lions.map((l, i) => b(`shishi${i}`, 'prop', l.x, l.z, 0.55, 0.55, 2.2)),
   ...TEMPLE_DECOR.poles.map((l, i) => b(`flagPole${i}`, 'prop', l.x, l.z, 0.2, 0.2, 8)),
   // 椰树树干、灯柱（以前只挡镜头，人可以穿过去）
-  ...[[-7.0, 30], [8.5, 30], [-12, 21], [17.6, 11.6], [10.5, 2], [-12.5, 9], [24.6, -6], [24.8, 2.6], [16, -11], [14, 4.8]].map(([x, z], i) => b(`palm${i}`, 'tree', x, z, 0.3, 0.3, 9)),
+  ...[[-7.0, 30], [8.5, 30], [-12, 21], [17.6, 11.6], [10.5, 2], [-12.5, 9], [25.9, -6], [25.9, 2.6], [16, -11], [14, 4.8]].map(([x, z], i) => b(`palm${i}`, 'tree', x, z, 0.3, 0.3, 9)),
   ...[[23.4, -5], [23.4, 1.5], [17.6, -6.5], [17.6, 3.5]].map(([x, z], i) => b(`eastLamp${i}`, 'prop', x, z, 0.15, 0.15, 1.5)),
 ];
 /** 入座/离座的自动走路：可以走进浴池、走到凳子上 */
