@@ -2,10 +2,10 @@ import { WORLD_BOUNDS, TEMPLE, EAST_BANK_WALL_X, ZEN_SOUTH_WALL_Z } from './worl
 
 /**
  * 地图四周的围墙（白灰墙 + 红瓦顶）。以前边上是看不见的墙，走过去会突然卡住。
- * 墙中线在可走范围外 0.25m；店屋、天后宫已经挡住的地方不用砌；河道上留水口。
+ * 墙中线在可走范围外 0.45m；店屋、天后宫已经挡住的地方不用砌；河道上留水口。
  * 河东岸：只留一条 4m 宽的河边步道，墙后面不能走（以前是一大片空地）。
  */
-const B = WORLD_BOUNDS, O = 0.25;
+const B = WORLD_BOUNDS, O = 0.45; // 墙柱内侧也要在人站得到的地方外面，不然贴墙站时镜头会被挤到后脑勺
 export type WallSeg = { x0: number; z0: number; x1: number; z1: number };
 export const WALLS: WallSeg[] = [
   // 西边：洗衰运后面、夜市街南头

@@ -33,7 +33,7 @@ export const POOL_WATER_Y = -0.1;
 export const POOL_FLOOR_Y = -0.5;
 const POOL_STEP_W = 0.55;
 /** 姻缘树：站到树前就可以写/看姻缘牌 */
-export const WISH_TREE = { x: 5.6, z: 14.5, standX: 2.9, standZ: 14.5, radius: 2.4 };
+export const WISH_TREE = { x: 5.6, z: 14.5, standX: 1.8, standZ: 14.5, radius: 2.4 }; // 站在花坛外面
 /** 香炉、功德箱 */
 export const CENSER = { x: 0.5, z: 23.2 };
 /** 功德箱：紧挨着香炉（2026-11-22 移近） */
@@ -235,15 +235,16 @@ export const SOLID_RECTS = [
   R(TEMPLE.x - 9.6, TEMPLE_STAIRS.minX, 26.6, 45), R(TEMPLE_STAIRS.maxX, TEMPLE.x + 9.6, 26.6, 45), R(TEMPLE_STAIRS.minX, TEMPLE_STAIRS.maxX, TEMPLE_STAIRS.door, 45),
   // 河（桥上可以过）
   R(18.7, 22.3, -20, -2.6), R(18.7, 22.3, -1.4, BRIDGE2.z0 + 0.1), R(18.7, 22.3, BRIDGE2.z1 - 0.1, 45),
-  // 姻缘树：树干和垂下来的气根（站在树前许愿的地方在外面）
-  R(3.9, 7.3, 12.3, 16.7),
   // 禅院佛台
   R(ZEN_HALL.altarX - 0.8, ZEN_HALL.maxX + 0.2, ZEN_HALL.minZ, ZEN_HALL.maxZ),
   // 河东岸围墙外面
   R(EAST_BANK_WALL_X, 45, -20, ZEN_SOUTH_WALL_Z),
 ];
+/** 圆形挡块：姻缘树的圆花坛（量过模型：半径约 3.2m，再加人身半宽）。以前是方块，比花坛小，人会走进花坛里 */
+export const SOLID_CIRCLES = [{ x: 5.6, z: 14.5, r: 3.45 }];
 export function insideWalk(x: number, z: number): boolean {
   const B = WORLD_BOUNDS; if (x < B.minX || x > B.maxX || z < B.minZ || z > B.maxZ) return false;
+  for (const c of SOLID_CIRCLES) if (Math.hypot(x - c.x, z - c.z) < c.r) return false;
   for (const r of SOLID_RECTS) if (x > r.minX && x < r.maxX && z > r.minZ && z < r.maxZ) return false;
   return true;
 }

@@ -98,7 +98,7 @@ export const REDSTRING_MS = 90_000;
 
 // ───────── 地图：分区 + 找路 ─────────
 export const MAP_GROUPS: Array<{ name: string; places: Array<{ name: string; x: number; z: number }> }> = [
-  { name: '庙口', places: [{ name: '天后宫', x: 0.5, z: 26 }, { name: '上香', x: 0.5, z: 22.4 }, { name: '求签', x: 8.0, z: 24.4 }, { name: '姻缘树', x: 2.9, z: 14.5 }] },
+  { name: '庙口', places: [{ name: '天后宫', x: 0.5, z: 26 }, { name: '上香', x: 0.5, z: 22.4 }, { name: '求签', x: 8.0, z: 24.4 }, { name: '姻缘树', x: 1.8, z: 14.5 }] },
   { name: '老街', places: [{ name: 'Mamak', x: -0.4, z: 17 }, { name: '打小人', x: -2.6, z: 10.7 }, { name: '烧烦恼', x: -3.8, z: 3 }, { name: '游艺档', x: -3.8, z: 0.2 }, { name: '抽红包', x: -3.9, z: 5.6 }, { name: '命理阁', x: 4.2, z: 2 }, { name: '游园纸', x: 2.6, z: -1.3 }] },
   { name: '夜市街', places: [{ name: '拉茶', x: -15.2, z: 17 }, { name: '冰球', x: -15.2, z: 11 }, { name: '每周摊', x: WEEKLY_SPOT.x, z: WEEKLY_SPOT.z }, { name: '面具', x: -15.2, z: 5 }, { name: '红纸', x: -14.6, z: 14 }, { name: '五粒子', x: -14.7, z: 20 }, { name: '捞金鱼', x: -14.5, z: 1.0 }] },
   { name: '童玩巷', places: [{ name: '斗擦胶', x: -9, z: -3 }, { name: '弹珠台', x: -11.9, z: -3.2 }, { name: '跳飞机', x: -15.3, z: -6 }] },

@@ -38,7 +38,7 @@ export const GOLDFISH = {
 /** 捞到 n 条拿几金币 */
 export const goldfishPay = (n: number) => GOLDFISH.pay.find((p) => n >= p.n)?.coins ?? 0;
 /** 纸网在水里能撑多久（毫秒）：今天连着赢的局数越多，纸越薄 */
-export const goldfishPaper = (streak: number) => Math.max(2400, 4200 - Math.max(0, Math.min(6, streak)) * 300);
+export const goldfishPaper = (streak: number) => Math.max(4200, 7500 - Math.max(0, Math.min(6, streak)) * 550); // 纸网泡水几毫秒会破（2026-11-23 放宽：原来 4.2 秒，瞄准的人也只捞到 1–2 条；连赢一局薄一点）
 export interface PondFish { id: number; x: number; y: number; a: number; speed: number; size: number; color: 'red' | 'orange' | 'calico' | 'black' }
 /** 这一局池里的鱼（同一个 seed 在服务器和手机上一样）：编号 1..8、位置、速度、大小 */
 export function goldfishPond(seed: number): PondFish[] {
