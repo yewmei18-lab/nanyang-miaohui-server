@@ -2,7 +2,7 @@
  * 第 5 批：三条街坊故事、每周摊主、每日三个小发现、送礼/邀请、地图找路。
  * 服务器和客户端共用同一份数据（地点、台词、价格），服务器负责判断“你真的走到了没有”。
  */
-import { CAT_SPOTS, SPOTS, WISH_TREE } from './world3d.ts';
+import { CAT_SPOTS, SPOTS, WISH_TREE, POPO, MINGLI, MAMAK_SHOP } from './world3d.ts';
 import { dayIndex } from './street.ts';
 
 const spot = (id: string) => { const s = SPOTS.find((x) => x.id === id)!; return { x: s.x, z: s.z }; };
@@ -23,23 +23,27 @@ export interface Story { id: StoryId; title: string; teaser: string; reward: num
 
 /** Mamak 门口那张红凳（橘猫有时也睡在这里） */
 const MAMAK_STOOL = { x: 0.4, z: 15.3 }; // 红凳旁的街边（不压在桌位上，免得和「坐下吃东西」抢）
+/** 故事只找真的站在那里的人：打小人婆婆、命理阁师傅、Mamak 的 Aneh */
+const AT_POPO = { x: POPO.x + 1.6, z: POPO.z - 0.6 };
+const AT_MASTER = { x: MINGLI.stoolX - 0.9, z: MINGLI.z };
+const AT_ANEH = { x: MAMAK_SHOP.counterX + 0.8, z: MAMAK_SHOP.counterZ + 0.1 }; // 柜台前，不贴着 Mamak 凳子
 export const STORIES: Story[] = [
   {
-    id: 'slip', title: '阿伯，你的单掉了', teaser: 'Mamak 门口有一张被风吹走的单', reward: 20, keepsake: '阿伯的旧单',
+    id: 'slip', title: '婆婆，你的单掉了', teaser: 'Mamak 门口有一张被风吹走的单', reward: 20, keepsake: '婆婆的旧单',
     steps: [
-      { at: MAMAK_STOOL, r: 1.3, label: '捡起地上的单', who: 'Aneh', lines: ['诶，这张单是刚才那位阿伯的！', '上面写着：「两杯拉茶，一杯少甜。1975 年起」。', '他好像往夜市街那边走了，你帮忙追一下？'] },
-      { at: spot('tea'), r: 2.0, label: '问拉茶档', who: '拉茶档主', lines: ['阿伯？他每天来，拉茶一定要两杯。', '一杯他喝，一杯放在旁边……说是等老伴。', '刚才他说要买个面具给孙子，往前面走了。'] },
-      { at: spot('mask'), r: 2.0, label: '问面具档', who: '面具档 Auntie', lines: ['有有有，他买了一个小狮头面具。', '他说孙子明天第一次来庙会。', '然后他说要去河边喂鱼，每天都去。'] },
-      { at: spot('fish'), r: 2.0, label: '把单交给阿伯', who: '阿伯', lines: ['哎呀！我的单！', '这是我老伴以前写的，她写字比我好看。', '五十年了，每天两杯拉茶。谢谢你啊，年轻人。'] },
+      { at: AT_ANEH, r: 1.8, label: '捡起地上的单', who: 'Aneh', lines: ['诶，这张单是打小人婆婆的！', '上面写着：「两杯拉茶，一杯少甜。1975 年起」。', '她刚才说要去拉茶档、面具档走走，你沿着夜市街找找？'] },
+      { at: spot('tea'), r: 2.0, label: '看看拉茶档', who: '你', lines: ['拉茶档的柜台上，压着一张一模一样的旧单。', '旁边的便条写着：「婆婆老规矩，两杯。一杯她喝，一杯放旁边等阿公。」', '便条最后一行：「她说要去面具档给孙子买面具。」'] },
+      { at: spot('mask'), r: 2.0, label: '看看面具档', who: '你', lines: ['面具架上挂着一个小狮头面具，吊牌写着「已订：婆婆」。', '背面还有一行小字：「孙子明天第一次来庙会」。', '婆婆应该回到她的打小人摊了。'] },
+      { at: AT_POPO, r: 1.8, label: '把单交给婆婆', who: '打小人婆婆', lines: ['哎呀！我的单！', '这是我老伴以前写的，他写字比我好看。', '五十年了，每天两杯拉茶。谢谢你啊，乖仔。'] },
     ],
   },
   {
-    id: 'cat', title: '橘猫偷了谁的位？', teaser: '戏班师傅说：我的位子被猫占了', reward: 20, keepsake: '橘猫的红绳',
+    id: 'cat', title: '橘猫偷了谁的位？', teaser: '命理阁师傅说：我的位子被猫占了', reward: 20, keepsake: '橘猫的红绳',
     steps: [
-      { at: spot('backstage'), r: 2.0, label: '问戏班师傅', who: '戏班师傅', lines: ['我每次看戏坐的那张小凳，被一只橘猫占了！', '它还把我帽子上的红绳叼走了。', '今天它不知道又躲去哪里，你帮我找找？'] },
+      { at: AT_MASTER, r: 1.8, label: '问命理阁师傅', who: '命理阁师傅', lines: ['我每晚去看戏坐的那张小凳，被一只橘猫占了！', '它还把我算盘上的红绳叼走了。', '今天它不知道又躲去哪里，你帮我找找？'] },
       { at: 'cat', r: 2.0, label: '找到橘猫', who: '橘猫', lines: ['喵～', '（嘴里叼着一条红绳，看了你一眼，往姻缘树那边跑了）'] },
       { at: { x: WISH_TREE.standX, z: WISH_TREE.standZ }, r: 2.4, label: '看看姻缘树下', who: '你', lines: ['姻缘树下堆着好多红绳，都是大家掉的。', '原来橘猫每天把掉在地上的红绳，叼回姻缘树。', '师傅那条也在这里。'] },
-      { at: spot('backstage'), r: 2.0, label: '把红绳还给师傅', who: '戏班师傅', lines: ['哈哈，原来它是在帮月老做工！', '那张小凳就让给它吧。', '它比我还会看戏。'] },
+      { at: AT_MASTER, r: 1.8, label: '把红绳还给师傅', who: '命理阁师傅', lines: ['哈哈，原来它是在帮月老做工！', '那张小凳就让给它吧。', '它比我还会看戏。'] },
     ],
   },
   {
@@ -47,7 +51,7 @@ export const STORIES: Story[] = [
     steps: [
       { at: spot('photowall'), r: 2.0, label: '看看照片墙后面', who: '你', lines: ['墙后面夹着半张发黄的照片。', '一个少年坐在红色的塑料凳上拉茶，另一半被撕掉了。', '背面写着：「1978 年庙会。我们说好，老了再来这里拍一张。」'] },
       { at: spot('wishrack'), r: 2.0, label: '翻翻祝福架', who: '一张祝福牌', lines: ['「寻人：1978 年庙会，坐红凳拉茶的少年。」', '「我手上有另外半张。我每年都来，红凳还在吗？」', '——没有留名字。'] },
-      { at: spot('tea'), r: 2.0, label: '问拉茶档', who: '拉茶档主', lines: ['红凳？那是我阿公的档！', '以前拉茶档就摆在 Mamak 门口，那张红凳到现在还在。', '照片上拉茶的少年……就是我阿公。'] },
+      { at: AT_ANEH, r: 1.8, label: '问 Mamak 的 Aneh', who: 'Aneh', lines: ['红凳？那是我们 Mamak 最老的凳子！', '以前有个拉茶档就摆在 Mamak 门口，那张红凳到现在还在。', '照片上拉茶的少年……是我们老板的阿公。'] },
       { at: MAMAK_STOOL, r: 1.3, label: '在红凳前拍一张', who: '你', lines: ['你站在当年那张红凳前。', '一半是 1978 年，一半是现在。', '这张「当年与现在」，挂上祝福架，那个人一定看得到。'] },
     ],
   },
@@ -61,10 +65,10 @@ export function storyTarget(st: StoryStep, day: string): { x: number; z: number 
 // ───────── 每周摊主（马来西亚时间每周一 00:00 换） ─────────
 export const WEEKLY_SPOT = { x: -15.2, z: 8.0, r: 1.5 };
 export const WEEKLY = [
-  { id: 'dough', name: '捏面人阿伯', sign: '捏面人', price: 12, intro: '一团米面，捏一只给你带回家。', works: [
+  { id: 'dough', name: '捏面人摊', sign: '捏面人', price: 12, intro: '一团米面，捏一只给你带回家。', works: [
     { id: 'dough_lion', name: '面人小狮头' }, { id: 'dough_cat', name: '面人橘猫' }, { id: 'dough_rabbit', name: '面人小兔' }, { id: 'dough_fu', name: '面人阿福' },
   ] },
-  { id: 'lantern', name: '花灯婆婆', sign: '花灯', price: 12, intro: '纸扎花灯，晚上会亮。', works: [
+  { id: 'lantern', name: '纸扎花灯摊', sign: '花灯', price: 12, intro: '纸扎花灯，晚上会亮。', works: [
     { id: 'lamp_rabbit', name: '兔子灯' }, { id: 'lamp_carp', name: '鲤鱼灯' }, { id: 'lamp_star', name: '杨桃灯' }, { id: 'lamp_lotus', name: '莲花灯' },
   ] },
 ] as const;

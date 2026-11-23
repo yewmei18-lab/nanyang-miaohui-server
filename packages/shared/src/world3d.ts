@@ -83,16 +83,16 @@ export const SPOTS: Spot[] = [
   { id: 'batu', kind: 'batu', x: -13.6, z: 20.0, r: 1.8, label: '玩五粒子', face: -Math.PI / 2 },
   { id: 'eraser', kind: 'eraser', x: -9.0, z: -4.2, r: 1.8, label: '斗擦胶', face: 0 },
   { id: 'marble', kind: 'marble', x: -11.9, z: -2.4, r: 1.6, label: '玩弹珠台', face: Math.PI },
-  { id: 'hop', kind: 'hop', x: -15.3, z: -6.0, r: 1.4, label: '跳飞机', face: 0 },
+  { id: 'hop', kind: 'hop', x: -15.3, z: -6.0, r: 1.8, label: '跳飞机', face: 0 },
   { id: 'wishrack', kind: 'wishrack', x: 10.4, z: -6.3, r: 1.8, label: '看祝福、留一句话', face: Math.PI },
   { id: 'shadow', kind: 'shadow', x: 11.6, z: -2.2, r: 2.0, label: '玩对对碰', face: 0 },
   { id: 'fish', kind: 'fish', x: 18.0, z: -4.2, r: 1.8, label: '撒鱼粮', face: Math.PI / 2 },
   { id: 'stage', kind: 'stage', x: 12.6, z: 15.0, r: 1.8, label: '布袋戏台：玩戏偶 · 看几点开演', face: Math.PI / 2 },
   { id: 'backstage', kind: 'backstage', x: 16.45, z: 15.0, r: 1.8, label: '拉开布帘', face: -Math.PI / 2 },
-  { id: 'drum', kind: 'drum', x: 15.5, z: 2.3, r: 1.8, label: '跟鼓师打鼓（一关比一关难）', face: 0 },
+  { id: 'drum', kind: 'drum', x: 15.5, z: 2.3, r: 1.8, label: '打大鼓（一关比一关难）', face: 0 },
   { id: 'rain', kind: 'rain', x: ZEN_HALL.minX + 4.5, z: ZEN_HALL.minZ + 1.75, r: 1.3, label: '敲水缸听雨', face: -Math.PI / 2 },
   { id: 'photowall', kind: 'photowall', x: 4.9, z: -4.6, r: 1.8, label: '看老照片', face: 0 },
-  { id: 'stamp', kind: 'stamp', x: 2.6, z: -1.3, r: 1.5, label: '领游园纸、盖章', face: 0 },
+  { id: 'stamp', kind: 'stamp', x: 2.6, z: 0.4, r: 1.5, label: '领游园纸、盖章', face: Math.PI }, // 站在桌子前面（街那边），桌子在 z -0.55
   { id: 'board', kind: 'board', x: 3.3, z: 3.6, r: 1.6, label: '看今日庙会', face: -Math.PI / 2 },
   { id: 'casino', kind: 'casino', x: -4.6, z: 0.2, r: 1.8, label: '游艺档（4 个小游戏）', face: 0 },
   // 年味小玩意（2026-11-23）：老街的红包架、夜市街的金鱼盆、灯笼巷的灯谜架
@@ -299,7 +299,7 @@ export const COLLIDERS: Box[] = [
   b('guessTable', 'table', -2.35, 22.75, 0.45, 0.45, 0.8), b('guessHost', 'npc', -3.15, 22.75, 0.25, 0.25, 1.5),
   b('puppetStage', 'building', 14.8, 15.0, 0.7, 1.85, 3),
   b('qiuqian', 'table', QIUQIAN.x, QIUQIAN.z, 0.55, 0.28, 0.85),
-  b('mingliDesk', 'table', 5.9, MINGLI.z, 0.25, 0.62, 0.75), b('mingliMaster', 'npc', MINGLI.masterX, MINGLI.z, 0.25, 0.3, 1.2),
+  b('mingliDesk', 'table', 5.9, MINGLI.z, 0.25, 0.62, 0.75), b('mingliMaster', 'npc', 6.45, MINGLI.z, 0.3, 0.75, 1.2), // 师傅和椅子后面整块挡住，不能走进去坐师傅的位
   b('banyanTrunk', 'tree', 5.6, 14.5, 1.1, 1.1, 5),
   b('yuelao', 'building', 16.0, 20.4, 2.1, 1.8, 4),
   b('gateL', 'prop', -3.6, -3.5, 0.5, 0.5, 4), b('gateR', 'prop', 3.6, -3.5, 0.5, 0.5, 4),
@@ -320,7 +320,7 @@ export const COLLIDERS: Box[] = [
   ...TEMPLE_DECOR.lions.map((l, i) => b(`shishi${i}`, 'prop', l.x, l.z, 0.55, 0.55, 2.2)),
   ...TEMPLE_DECOR.poles.map((l, i) => b(`flagPole${i}`, 'prop', l.x, l.z, 0.2, 0.2, 8)),
   // 椰树树干、灯柱（以前只挡镜头，人可以穿过去）
-  ...[[-7.0, 30], [8.5, 30], [-12, 21], [17.6, 11.6], [10.5, 2], [-12.5, 9], [25.9, -6], [25.9, 2.6], [16, -11], [14, 4.8]].map(([x, z], i) => b(`palm${i}`, 'tree', x, z, 0.3, 0.3, 9)),
+  ...[[-7.0, 30], [8.5, 30], [-10.9, 22.6], [17.6, 11.6], [10.5, 2], [-12.5, 9], [25.9, -6], [25.9, 2.6], [16, -11], [14, 4.8]].map(([x, z], i) => b(`palm${i}`, 'tree', x, z, 0.3, 0.3, 9)),
   ...[[23.4, -5], [23.4, 1.5], [17.6, -6.5], [17.6, 3.5]].map(([x, z], i) => b(`eastLamp${i}`, 'prop', x, z, 0.15, 0.15, 1.5)),
 ];
 /** 入座/离座的自动走路：可以走进浴池、走到凳子上 */

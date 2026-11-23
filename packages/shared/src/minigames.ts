@@ -72,7 +72,7 @@ export const MG_RULES: Record<MgGame, MgRule> = {
     onLose: (l) => l,
   },
   drum: {
-    name: '跟鼓师打鼓', maxLevel: 12,
+    name: '打大鼓', maxLevel: 12,
     // 第 1、2 关是热身，第 3 关起才有金币
     reward: (l) => (l < 3 ? 0 : Math.min(8, l - 1)), capCoins: 25, capWins: 99,
     minMs: (l) => 600 + drumBeats(l) * drumGap(l) + drumBeats(l) * 150,

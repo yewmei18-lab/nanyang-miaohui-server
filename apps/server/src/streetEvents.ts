@@ -112,10 +112,12 @@ export class StreetEvents {
   /** 桥灯：走到桥灯旁边就点亮（平时也可以一盏一盏点，10 分钟没人点就慢慢熄掉；活动结束全部熄掉重来） */
   private wasLantern = false;
   private tickBridgeLamps(now: number, lanternEvent: boolean) {
-    if (this.wasLantern && !lanternEvent) { this.room.state.lamps = 0; }
+    // 活动开始、结束都全部熄掉重来（不然平时有人走过桥，活动一开始桥就已经全亮了）
+    if (this.wasLantern !== lanternEvent) { this.room.state.lamps = 0; }
     this.wasLantern = lanternEvent;
     for (const [sid, p] of this.room.state.players) {
       if (p.st !== PSTATE.MOVING) continue;
+      if (lanternEvent && !p.lamp) continue; // 百灯过桥：要提着借来的灯才点得亮
       BRIDGE_LAMPS.forEach((l, i) => {
         if (!(this.room.state.lamps & (1 << i)) && Math.hypot(p.x - l.x, p.z - l.z) < 0.9) {
           this.room.state.lamps |= 1 << i; this.lampsLitAt = now; this.room.stamp?.(sid, 'bridge');
