@@ -142,6 +142,11 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     this.onMessage('guess.answer', (client, m: { v?: unknown }) => client.send('guess.ack', { ok: this.street.answerGuess(client.sessionId, m?.v), v: m?.v }));
     this.onMessage('puppet.vote', (client, m: { c?: unknown }) => client.send('puppet.ack', { ok: this.street.votePuppet(client.sessionId, m?.c), c: m?.c }));
     this.onMessage('lamp.borrow', (client) => { this.street.borrowLamp(client.sessionId); });
+    // 本地测试：瞬移（检查穿模用；线上没有 ALLOW_DEBUG，不会生效）
+    this.onMessage('debug.tp', (client, m: { x?: unknown; z?: unknown }) => {
+      if (process.env.ALLOW_DEBUG !== '1' || typeof m?.x !== 'number' || typeof m?.z !== 'number') return;
+      const p = this.state.players.get(client.sessionId); if (!p || p.seat >= 0) return; p.x = m.x; p.z = m.z;
+    });
     // 本地测试：把活动时钟拨到“第 min 分 sec 秒”
     this.onMessage('debug.clock', (_c, m: { min?: unknown; sec?: unknown }) => {
       if (process.env.ALLOW_DEBUG !== '1' || typeof m?.min !== 'number') return;
@@ -1221,6 +1226,19 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
     return [AISLES[0], b];
   }
 
+  /** Aneh 在桌边站哪：两张凳子中间的空位（离桌心 1.1m），面向客人。以前站在客人正后面 0.7m，手会穿进客人身体 */
+  private serveSpot(seatId: number, from: { x: number; z: number }): Array<{ x: number; z: number }> {
+    const s = SEATS[seatId]; const t = MAMAK_TABLES[(s as { table?: number }).table ?? -1];
+    if (!t) return this.route(from, s.approach);
+    const a = Math.atan2(s.seat.x - t.x, s.seat.z - t.z);
+    const gaps = [0, 1.485, Math.PI, -1.49].map((g) => t.face + g);
+    const diff = (g: number) => Math.abs(Math.atan2(Math.sin(g - a), Math.cos(g - a)));
+    const near2 = gaps.sort((p, q) => diff(p) - diff(q)).slice(0, 2);
+    const at = (g: number, r: number) => ({ x: t.x + Math.sin(g) * r, z: t.z + Math.cos(g) * r });
+    const g = near2.sort((p, q) => Math.hypot(at(p, 1.1).x - from.x, at(p, 1.1).z - from.z) - Math.hypot(at(q, 1.1).x - from.x, at(q, 1.1).z - from.z))[0];
+    return [...this.route(from, at(g, 1.7)), at(g, 1.1)];
+  }
+
   private tickStaff(now: number) {
     const st = this.staff, A = this.state.aneh;
     const dt = TICK_MS / 1000;
@@ -1247,7 +1265,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       const next = this.staffQueue.shift();
       if (!next) { A.speed = 0; return; }
       st.task = next; A.seat = next.seatId;
-      if (next.kind === 'visit') { st.phase = 'walk'; st.path = this.route({ x: A.x, z: A.z }, SEATS[next.seatId].approach); }
+      if (next.kind === 'visit') { st.phase = 'walk'; st.path = this.serveSpot(next.seatId, { x: A.x, z: A.z }); }
       else { st.phase = 'cook'; st.path = this.route({ x: A.x, z: A.z }, COUNTER); st.until = 0; next.order!.status = 'cooking'; void setOrderStatus(next.order!.id, 'cooking'); this.sendTo(next.order!.it, 'mamak.status', { phase: 'cooking', item: next.order!.item.id }); }
       return;
     }
@@ -1269,7 +1287,7 @@ export class PlazaRoom extends Room<{ state: typeof PlazaState.prototype }> {
       const o = task.order!;
       A.carry = o.item.id; A.act = 0; o.status = 'serving'; void setOrderStatus(o.id, 'serving');
       this.sendTo(o.it, 'mamak.status', { phase: 'serving', item: o.item.id });
-      st.phase = 'walk'; st.path = this.route({ x: A.x, z: A.z }, SEATS[task.seatId].approach);
+      st.phase = 'walk'; st.path = this.serveSpot(task.seatId, { x: A.x, z: A.z });
     } else if (st.phase === 'place') {
       if (now < st.until) return;
       const o = task.order!;
